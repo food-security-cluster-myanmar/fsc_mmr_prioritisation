@@ -209,15 +209,16 @@ fs_pin <- pin %>%
                            conflict_score < mean(conflict_score) & population_density >= 500 ~ "B1",
                            conflict_score < mean(conflict_score) & population_density < 500 ~ "B2")) 
 
+# show_col(viridis_pal(option = "cividis")(10))
 ```
+
+
 
 ## Introduction 
 
-As noted by the FSC's analysis of ACLED  conflict data, there was no discernible relationship between food security partners' presence and the incidence of conflict in 2021. With reference to the plot below, the incidence of conflict, represented by the conflict score (see the **[FSC's Conflict Analysis](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/)** for more details).
+As noted by the FSC's analysis of ACLED  conflict data, there was no discernible relationship between food security partners' presence and the incidence of conflict in 2021. This document intends to inform strategic and operational decision making and provides evidence intended to guide geographic prioritisation at the township level. For more information, please see the **[FSC's Conflict Analysis](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/)**.
 
-This document intends to inform strategic and operational decision making and provides evidence intended to guide geographic prioritisation at the township level. 
-
-<br><br>
+<br><br><br>
 
 ## 1. Distribution of conflict events in Myanmar
 
@@ -309,11 +310,63 @@ conflict_score %>%
 
 ### 1.1 Updating the MIMU-HARP Conflict Index
 
-To aid in prioritisation, a conflict score was calculated using the conflict data. At its most basic level, the conflict score is the average of the normalised values of battles, explosions and remote violence, violence against civilians, strategic developments, non-peaceful protests and riots and conflict-related fatalities. For more details, please see the  **[FSC's Conflict Analysis](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/#revisiting-the-mimu-harp-conflict-index)**.
+To aid in prioritisation, a conflict score was calculated, making use of available conflict data. At its most basic level, the conflict score is the average of the normalised counts of battles, explosions and remote violence, violence against civilians, strategic developments, non-peaceful protests and riots and conflict-related fatalities. For more details, please see the  **[FSC's notes on updating the MIMU-HARP Conflict Index](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/#revisiting-the-mimu-harp-conflict-index)**. This score will be now be used as a shorthand for conflict incidence in Myanmar. 
 
-Additionally, different types of townships necessitate different programming options -- the types of interventions suited to urban centres might not be relevant to rural areas. Townships have then been split into four groups (A1, A2, B1 and B2) based on their conflict score and population density. This is a quick-and-dirty grouping of townships to aid in the prioritisation process. The table provides summary statistics for each of the four groups:
+It is additionally recognised that different types of townships necessitate different programming options. The types of interventions suited to urban centres might not be relevant to rural areas. As part of this initial prioritisation tool, townships have been split into four simple groups (A1, A2, B1 and B2), based on their conflict score and population density.
 
-To aid in prioritisation, all 330 townships have been separated into 4 groups based on their conflict scores and population density, as a note, higher conflict scores indicate a higher share of conflict. Below is a summary table of each group's characteristics, including the PIN and population targeted within the townships in each group, the average conflict score of each group (higher conflict scores indicate higher incidence of conflict), the average population density and the number of townships: 
+This grouping separates all 330 townships along two criteria -- high or low conflict score (A or B) and high or low population density (1 or 2). Groups A1 and A2 have above average conflict scores. These 107 townships should be prioritised for humanitarian interventions. Recalling the scatterplot above, the colours have now been updated to reflect the prioritisation group. From the plot below that whilst group A1 have populations that are easier to access (having higher population density), the incidence of conflict is higher overall in group A2, with the numbers of conflict-related fatalities being much higher. This quick-and-dirty prioritisation has managed to exclude all the townships in bottom-left quadrant (least conflict-affected) from groups A1 and A2. 
+
+<br>
+
+```{r scatterplot-groups}
+fs_pin %>% 
+  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
+           violence_against_civilians) %>% 
+  ggplot(aes(x = total_events, y = fatalities, colour = group, size = fatalities)) +
+  geom_point() +
+  scale_y_continuous(breaks = seq(0, 500, by = 100)) +
+  scale_colour_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
+  # scale_colour_viridis_d(option = "cividis") +
+  geom_hline(aes(yintercept = mean(fatalities, na.rm = TRUE)), colour = "red", lty = 2) +
+  geom_vline(aes(xintercept = mean(total_events, na.rm = TRUE)), colour = "red", lty = 2) +
+  labs(x = "Conflict events", 
+       y = "Fatalities",
+       title = "Conflict events and fatalities by prioritisation group", 
+       subtitle = "Means of both axes are marked by the dotted red line",
+       colour = "group", 
+       size = "fatalities") 
+
+```
+
+<br>
+
+Groups A1 and A2 can be distinguished by their population density, with the average population density in group A1 being more than 100 times higher than in group A2. The average PIN per township is slightly higher in group A1 than in group A2. The scatterplot below shows townships by the number of people in need (x-axis) and the population density (y-axis), with the colours reflecting which group each belongs to:
+
+<br>
+
+```{r}
+fs_pin %>% 
+  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
+           violence_against_civilians) %>% 
+  ggplot(aes(x = fs_pin, y = population_density, colour = group, size = conflict_score)) +
+  geom_point() +
+  scale_colour_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
+  # scale_colour_viridis_d(option = "cividis") +
+  scale_x_continuous(labels = comma, trans = "log10") +
+  scale_y_continuous(labels = comma_format(accuracy = 1), trans = "log10") +
+  geom_hline(aes(yintercept = mean(population_density, na.rm = TRUE)), colour = "red", lty = 2) +
+  geom_vline(aes(xintercept = mean(fs_pin, na.rm = TRUE)), colour = "red", lty = 2) +
+  labs(x = "People in need", 
+       y = "Population density",
+       title = "People in need and population density by prioritisation group", 
+       subtitle = "Means of both axes are marked by the dotted red line",
+       colour = "group", 
+       size = "conflict\nscore") 
+```
+
+<br>
+
+The table below provides some summary statistics for each of the four groups. Included are the PIN and population targeted within the townships in each group, the average conflict score (higher conflict scores indicate a higher incidence of conflict), the average population density and the number of townships within each group: 
 
 <br>
 
@@ -336,57 +389,6 @@ fs_pin %>%
 #  save_kable(file = "summary_stats_groups.png", zoom = 2)
   
 ```
-
-<br>
-
-Groups A1 and A2 have above average conflict scores. These 107 townships should be prioritised for humanitarian interventions. Recalling the scatterplot above, the colours have now been updated to reflect the prioritisation group. From the plot below that whilst group A1 have populations that are easier to access (having higher population density), the incidence of conflict is much higher overall in group A2. This quick-and-dirty prioritisation has managed to exclude all the townships in bottom-left quadrant (least conflict-affected) from groups A1 and A2. 
-
-<br>
-
-```{r scatterplot-groups}
-fs_pin %>% 
-  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
-           violence_against_civilians) %>% 
-  ggplot(aes(x = total_events, y = fatalities, colour = group, size = fatalities)) +
-  geom_point() +
-  scale_y_continuous(breaks = seq(0, 500, by = 100)) +
-  scale_colour_viridis_d(option = "cividis") +
-  geom_hline(aes(yintercept = mean(fatalities, na.rm = TRUE)), colour = "red", lty = 2) +
-  geom_vline(aes(xintercept = mean(total_events, na.rm = TRUE)), colour = "red", lty = 2) +
-  labs(x = "Conflict events", 
-       y = "Fatalities",
-       title = "Conflict events and fatalities by prioritisation group", 
-       subtitle = "Means of both axes are marked by the dotted red line",
-       colour = "group", 
-       size = "fatalities") 
-
-```
-
-<br>
-
-Groups A1 and A2 can be distinguished by their population density, with the average population density in group A1 being more than 100 times higher than in group A2. The average PIN per township is slightly higher in group A1 than in group A2. 
-
-<br>
-
-```{r}
-fs_pin %>% 
-  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
-           violence_against_civilians) %>% 
-  ggplot(aes(x = fs_pin, y = population_density, colour = group, size = conflict_score)) +
-  geom_point() +
-  scale_colour_viridis_d(option = "cividis") +
-  scale_x_continuous(labels = comma, trans = "log10") +
-  scale_y_continuous(labels = comma_format(accuracy = 1), trans = "log10") +
-  geom_hline(aes(yintercept = mean(population_density, na.rm = TRUE)), colour = "red", lty = 2) +
-  geom_vline(aes(xintercept = mean(fs_pin, na.rm = TRUE)), colour = "red", lty = 2) +
-  labs(x = "People in need", 
-       y = "Population density",
-       title = "People in need and population density by prioritisation group", 
-       subtitle = "Means of both axes are marked by the dotted red line",
-       colour = "group", 
-       size = "conflict\nscore") 
-```
-
 
 <br><br>
 
@@ -414,11 +416,14 @@ fs_pin %>%
   ggplot() + 
   geom_sf(aes(fill = group), size = 0.1, colour = "gray20") + 
   geom_sf(data = pcode1_shape, alpha = 0, colour = "black", size = 0.5) +
-  scale_fill_viridis_d(end = 0.9, option = "cividis") +
+  scale_fill_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
+  # scale_fill_viridis_d(end = 0.9, option = "cividis") +
   theme_void() +
   labs(title = "Townships by prioritisation group", 
-       fill = "priori-\ntisation\ngroup") +
-  theme(plot.background = element_rect(fill = "white", colour = NA))  
+       fill = "priori-\ntisation\ngroup",
+       caption = "Data source: ACLED; acleddata.com and FSC calculations") +
+  theme(plot.caption=element_text(hjust = 0.5), 
+        plot.background = element_rect(fill = "white", colour = NA))  
   
 # ggsave("conflict_score_map.png", dpi = 300, height = 12, width = 7, units = "in")
 ```
@@ -427,7 +432,9 @@ fs_pin %>%
 
 ### 1.3 Reference table for conflict variables
 
-Below is an interactive reference table for the various types of conflict events by township. It also includes the overall conflict score and prioritisation groups. 
+Below is an interactive reference table for the various types of conflict events by township. It also includes the overall conflict score and prioritisation groups. The search bar can be used to find specific townships, or any of the columns may be sorted according to ascending or descending values. The table currently shows townships in descending order of conflict score. 
+
+<br>
 
 ```{r}
 fs_pin %>% 
@@ -457,7 +464,7 @@ fs_pin %>%
 
 In light of the impending monsoon season, the probability that a township will be affected by a major flood or cylconic event has been calculated. Major floods since 2008 have been factored into this calculation. 
 
-For the moment, conflict and flood and cyclone risk will be evaluates separately. Flood and storm surge risk exist as probabilities for the moment; this might change were severe flooding to occur in 2022. 
+For the moment, conflict incidence and flood and cyclone risk will be evaluated separately. Flood and storm surge risk exist as probabilities for the moment; this might change were severe flooding to occur in 2022. 
 
 <br>
 
@@ -482,25 +489,26 @@ floods_storm_surge %>%
 
 <br>
 
-Based on this data, a score was calculated for each township based on how many times it had been affected by floods since 2008. The table below also summarises the number of people in need (2022): 
+Based on this data, a score was calculated for each township based on how many times it had been affected by floods since 2008. The table below also summarises the number of people in need (2022). `r fs_pin %>% filter(flood_count > 4) %>% {sum(.$fs_pin)} %>% round() %>% format(big.mark = ",")` people live in townships that have flooded more than 5 times since 2008. 
 
 ```{r}
 fs_pin %>% 
   replace_na(list(flood_count = 0)) %>% 
-  mutate(flood_count = ifelse(flood_count > 4, "5-9", flood_count)) %>% 
+  # mutate(flood_count = ifelse(flood_count > 4, "5-9", flood_count)) %>% 
   group_by(flood_count) %>% 
   summarise(townships = n(),
             people_in_need = round(sum(fs_pin), digits = 0)) %>% 
   arrange(desc(flood_count)) %>% 
   kable(caption = "Summary statistics by number of floods (2008-2021)", format.args = list(big.mark = ",")) %>% 
   kable_classic_2("striped", full_width = FALSE)
+
 ```
 
 <br><br>
 
 ### 2.2 Map of flood risk 
 
-The map below shows the probability of each township being affected by floods. The areas with the greatest risk of flooding are in Mon and those along the Ayeyarwady River. 
+The map below shows the probability of each township being affected by floods. The areas with the greatest risk of flooding are in Mon, near the mouth of the Sittaung River and the Gulf of Mottama and those along the Ayeyarwady River, and to a lesser extent, along the Chindwin River. 
 
 <br>
 
@@ -527,7 +535,9 @@ fs_pin %>%
 
 ### 2.3 Reference table for flood risk 
 
-Below is an interactive reference table for flood risk by township. 
+Below is an interactive reference table for flood risk by township. It includes the number of times since 2008 a township has been affected by flooding (flood_count) and the probability of flooding (flood_risk). Similar to the interactive table in the previous chapter, the search bar can be used to find specific townships and any of the columns may be sorted according to ascending or descending values. The table currently shows townships sorted in descending order of flood risk.
+
+<br>
 
 
 ```{r}
