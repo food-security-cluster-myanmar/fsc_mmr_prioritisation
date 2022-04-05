@@ -115,3 +115,31 @@ fs_pin %>%
          population_2021_proj, population_density,
          fs_pin, fs_targeted, conflict_score) %>% 
   write_csv("39_townships.csv")
+
+# failed highcharter -- now using plotly
+group_colours <-c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")
+
+x <- c("Events", "Fatalities", "Group")
+y <- sprintf("{point.%s:.2f}", c("total_events", "fatalities", "group"))
+
+tltip <- tooltip_table(x, y)
+
+fs_pin %>% 
+  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
+           violence_against_civilians,
+         p_group = factor(group)) %>% 
+  hchart("scatter",
+         hcaes(x = total_events, y = fatalities, color = p_group, size = fatalities), 
+         minSize = 2, maxSize = 20) %>% 
+  hc_xAxis(title = list(text = "Conflict events"), gridLinewidth = 0, type = "logarithmic",
+           plotLines = list(list(value = mean(fs_pin$fatalities, na.rm = TRUE), 
+                                 width = 3, color = "red"))) %>% 
+  hc_yAxis(title = list(text = "Fatalities"), gridLinewidth = 0, type = "logarithmic",
+           plotLines = list(list(value = mean(fs_pin$total_events, na.rm = TRUE), 
+                                 width = 3, color = "red"))) %>% 
+  hc_title(text = "Conflict events and fatalities by prioritisation group") %>% 
+  hc_subtitle(text = "Means of both axes are marked by the dotted red lines") %>% 
+  hc_tooltip(useHTML = TRUE, headerformat = "", pointFormat = tltip) %>% 
+  hc_size(height = 700)
+
+glimpse(fs_pin)
