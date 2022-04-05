@@ -55,10 +55,8 @@ library(DT)
 library(viridis)
 library(mdepriv)
 
-library(rattle)
-library(rpart)
-library(rpart.plot)
-library(rpart.utils)
+library(highcharter)
+library(plotly)
 
 library(RColorBrewer)
 
@@ -286,12 +284,19 @@ A requisite for any prioritisation score or index develop should be target, firs
 <br>
 
 ```{r conflict-scatterplot}
-conflict_score %>% 
+conflict_scatter <- conflict_score %>% 
   mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
            violence_against_civilians) %>% 
-  left_join(fs_pin %>% select(admin3_pcode, population_density), by = "admin3_pcode") %>% 
-  ggplot(aes(y = fatalities, x = total_events, colour = total_events)) +
+  left_join(fs_pin %>% select(state, township, partners_2021, admin3_pcode, population_density), by = "admin3_pcode") %>% 
+  ggplot(aes(y = fatalities, x = total_events, colour = total_events, 
+             text = paste0(township, ",", "\n",
+                           state, ",", "\n",
+                           "events: ", total_events, ",", "\n",
+                           "fatalities: ", fatalities, ",", "\n",
+                           "partners: ", partners_2021))) +
   geom_point(aes(size = fatalities)) +
+  scale_y_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300, 1000)) +
+  scale_x_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300)) +
   scale_colour_viridis(option = "magma", direction = -1) +
   geom_hline(aes(yintercept = mean(fatalities)), colour = "red", lty = 2) +
   geom_vline(aes(xintercept = mean(total_events)), colour = "red", lty = 2) +
@@ -301,6 +306,14 @@ conflict_score %>%
        subtitle = "Means of both axes are marked by the dotted red line",
        colour = "conflict\nevents", 
        size = "fatalities") 
+
+ggplotly(conflict_scatter, tooltip = c("text")) %>% 
+  # layout(showlegend = FALSE, legend = list(font = list(size = 6))) %>% 
+  config(displayModeBar = FALSE) %>% 
+  layout(title = list(text = paste0("Conflict events and fatalities by township",
+                                    "<br>",
+                                    "<sup>",
+                                    "mouse over for details; means marked by red lines; fatalities marked by size","</sup>")))
 
 # ggsave("tsp_scatter_conflict.png", dpi = 300, height = 5, width = 8, units = "in")
 
@@ -318,13 +331,21 @@ This grouping separates all 330 townships along two criteria -- high or low conf
 
 <br>
 
+
 ```{r scatterplot-groups}
-fs_pin %>% 
+scatter_groups <- fs_pin %>% 
   mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
            violence_against_civilians) %>% 
-  ggplot(aes(x = total_events, y = fatalities, colour = group, size = fatalities)) +
-  geom_point() +
-  scale_y_continuous(breaks = seq(0, 500, by = 100)) +
+  ggplot(aes(x = total_events, y = fatalities, colour = group, 
+             text = paste0(township, ",", "\n",
+                           state, ",", "\n",
+                           "group: ", group, ",", "\n",
+                           "events: ", total_events, ",", "\n",
+                           "fatalities: ", fatalities, ",", "\n",
+                           "partners: ", partners_2021))) +
+  geom_point(aes(size = fatalities), alpha = 0.85) +
+  scale_y_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300, 1000)) +
+  scale_x_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300)) +
   scale_colour_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
   # scale_colour_viridis_d(option = "cividis") +
   geom_hline(aes(yintercept = mean(fatalities, na.rm = TRUE)), colour = "red", lty = 2) +
@@ -336,6 +357,14 @@ fs_pin %>%
        colour = "group", 
        size = "fatalities") 
 
+ggplotly(scatter_groups, tooltip = c("text")) %>% 
+  # layout(showlegend = FALSE, legend = list(font = list(size = 6))) %>% 
+  config(displayModeBar = FALSE) %>% 
+  layout(title = list(text = paste0("Conflict events and fatalities by prioritisation group",
+                                    "<br>",
+                                    "<sup>",
+                                    "mouse over for details; means marked by red lines; fatalities marked by size","</sup>")))
+
 ```
 
 <br>
@@ -344,12 +373,19 @@ Groups A1 and A2 can be distinguished by their population density, with the aver
 
 <br>
 
+
 ```{r}
-fs_pin %>% 
+pop_scatter <- fs_pin %>% 
   mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
            violence_against_civilians) %>% 
-  ggplot(aes(x = fs_pin, y = population_density, colour = group, size = conflict_score)) +
-  geom_point() +
+  ggplot(aes(x = fs_pin, y = population_density, colour = group,
+             text = paste0(township, ",", "\n",
+                           state, ",", "\n",
+                           "group: ", group, ",", "\n",
+                           "events: ", total_events, ",", "\n",
+                           "fatalities: ", fatalities, ",", "\n",
+                           "partners: ", partners_2021))) +
+  geom_point(aes(size = conflict_score), alpha = 0.85) +
   scale_colour_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
   # scale_colour_viridis_d(option = "cividis") +
   scale_x_continuous(labels = comma, trans = "log10") +
@@ -362,6 +398,14 @@ fs_pin %>%
        subtitle = "Means of both axes are marked by the dotted red line",
        colour = "group", 
        size = "conflict\nscore") 
+
+ggplotly(pop_scatter, tooltip = c("text")) %>% 
+  # layout(showlegend = FALSE, legend = list(font = list(size = 6))) %>% 
+  config(displayModeBar = FALSE) %>% 
+  layout(title = list(text = paste0("People in need and population density by prioritisation group",
+                                    "<br>",
+                                    "<sup>",
+                                    "mouse over for details; means marked by red lines; conflict score marked by size","</sup>")))
 ```
 
 <br>
