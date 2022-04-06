@@ -1,0 +1,608 @@
+---
+title: "Notes on Preliminary Township Prioritisation"
+author: "Myanmar Food Security Cluster"
+date: "25/03/2022"
+output: 
+  html_document:
+    code_download: true
+    theme: readable
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    number_sections: false
+    collapsed: false
+always_allow_html: true   
+---
+
+```{css, echo=FALSE}
+
+#TOC::before {
+  content: "";
+  display: block;
+  height: 70px;
+  margin: 2em 20px 40px 20px;
+  background-image: url("Myanmar_cluster_blue.png");
+  background-size: contain;
+  background-position: center center;
+  background-repeat: no-repeat;
+}
+```
+
+```{=html}
+<style>
+    body .main-container {
+        max-width: 1280px;
+    }
+</style>
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.width=9, message = FALSE, warning=FALSE)
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(stringi)
+library(pander)
+library(janitor)
+library(scales)
+library(magrittr)
+library(sf)
+library(s2)
+library(bookdown)
+library(patchwork)
+library(kableExtra)
+library(DT)
+library(viridis)
+library(mdepriv)
+
+library(highcharter)
+library(plotly)
+
+library(RColorBrewer)
+
+theme_set(theme_minimal())
+
+# disabling scientific notation
+options(scipen = 999)
+
+# pander tables all in one row
+panderOptions('table.split.table', Inf)
+
+# pander thousands separator
+panderOptions("big.mark", ",")
+
+# replace 
+opts <- options(knitr.kable.NA = "")
+
+`%out%` <- Negate(`%in%`)
+
+# function beneficiary summaries
+sum_ben <- function(df, column_var){
+  
+  column_var <- enquo(column_var)
+  
+  df %>%
+    group_by(!!column_var) %>% # must add bang-bang
+    summarise(beneficiaries = sum(beneficiaries)) %>% 
+    arrange(desc(beneficiaries))
+    
+}
+
+# function beneficiary summaries, 2 grouped variables
+sum_ben2 <- function(df, column_var1, column_var2){
+  
+  column_var1 <- enquo(column_var1)
+  column_var2 <- enquo(column_var2)
+  
+  df %>%
+    group_by(!!column_var1, !!column_var2) %>% # must add bang-bang
+    summarise(beneficiaries = sum(beneficiaries)) %>% 
+    arrange(desc(beneficiaries))
+    
+}
+
+# reading in PIN
+pin <- read_excel("hpc_pin.xlsx")
+
+# reading in townships from geoadmins 
+townships <- read_excel("C:/Users/seany/Downloads/R/mmr_5w_initial_observations/FSC 5W 2021 - GEOADMINS_final 19.xlsx",
+           sheet = "GEOADMINS") %>% 
+  clean_names() %>% 
+  select(admin1pcode_4:admin3pcode) %>% 
+  rename(admin1_pcode = admin1pcode_4,
+         admin3_pcode = admin3pcode,
+         state_name   = state_5,
+         township_name  = county) %>% 
+  remove_empty() %>% 
+  mutate(admin3_pcode = ifelse(state_name == "Magway" & township_name == "Minhla", "MMR009013", admin3_pcode),
+         admin3_pcode = ifelse(state_name == "Yangon" & township_name == "Htantabin", "MMR013006", admin3_pcode))
+
+# shapefiles
+pcode3_shape <- st_read("C:/Users/seany/Downloads/R/acled/mmr_polbnda_adm3_mimu_250k/mmr_polbnda_adm3_mimu_250k.shp", quiet = TRUE) %>% 
+ rename(state = ST, 
+        admin1_pcode = ST_PCODE,
+        township = TS,
+        admin3_pcode = TS_PCODE) %>% 
+ mutate(admin3_pcode = ifelse(str_detect(township, "Hlaingtharya"), "MMR013008", admin3_pcode))
+
+pcode1_shape <- st_read("C:/Users/seany/Downloads/R/acled/mmr_polbnda2_adm1_mimu_250k/mmr_polbnda2_adm1_mimu_250k.shp", quiet = TRUE) %>% 
+ rename(state = ST, 
+        admin1_pcode = ST_PCODE) %>% st_as_sf()
+
+# reading in 5Ws
+fsc <- read_csv("C:/Users/seany/Downloads/R/acled/fsc5w_2021.csv")
+
+# reading in vulnerability dataset
+vulmmr <- read_excel("C:/Users/seany/Downloads/R/mmr_5w_initial_observations/Datasets_Vulnerability_Analysis_in_Myanmar_09Jul2018 (1).xlsx",
+           skip = 1) %>% 
+  slice(-c(1:3)) %>% 
+  clean_names() %>% 
+  select(-label) %>% 
+  mutate_at(vars(number_of_village_tracts:wb_wealth_rank), as.numeric) %>% 
+  mutate_at(vars(disasters_impacted_by_nargis_2008:acled_2015_2016_data_exists), as.logical) %>% 
+  mutate_at(vars(conflict_2015_2016_number_of_battles:corrected_conflict_index_garry), as.numeric) %>% 
+  select(-starts_with("x")) %>% 
+  select(-c(private_sector_development_2014_2015, protection_2010_2015, shelter_2010_2015, wash_2010_2015))
+
+# reading in conflict score
+conflict_score <- read_csv("conflict_score.csv")
+
+# show_col(viridis_pal()(10))
+
+floods_storm_surge <- read_excel("Flood_Affected_Township_(2008-2021) (1).xlsx") %>% 
+  clean_names() %>% 
+  rename(state = st, township = ts, admin1_pcode = st_pcode, admin3_pcode = ts_pcode) %>% 
+  mutate(year_2008_storm_surge = ifelse(!is.na(storm_surg), 1, 0)) %>%
+  mutate(year_2008 = ifelse(str_detect(flood_year, "2008"), 1, 0),
+         year_2009 = ifelse(str_detect(flood_year, "2009"), 1, 0),
+         year_2010 = ifelse(str_detect(flood_year, "2010"), 1, 0),
+         year_2011 = ifelse(str_detect(flood_year, "2011"), 1, 0),
+         year_2012 = ifelse(str_detect(flood_year, "2012"), 1, 0),
+         year_2013 = ifelse(str_detect(flood_year, "2013"), 1, 0),
+         year_2014 = ifelse(str_detect(flood_year, "2014"), 1, 0),
+         year_2015 = ifelse(str_detect(flood_year, "2015"), 1, 0),
+         year_2016 = ifelse(str_detect(flood_year, "2016"), 1, 0),
+         year_2017 = ifelse(str_detect(flood_year, "2017"), 1, 0),
+         year_2018 = ifelse(str_detect(flood_year, "2018"), 1, 0),
+         year_2019 = ifelse(str_detect(flood_year, "2019"), 1, 0),
+         year_2020 = ifelse(str_detect(flood_year, "2020"), 1, 0),
+         year_2021 = ifelse(str_detect(flood_year, "2021"), 1, 0)) %>%
+  rename(floodyears = flood_year) %>% 
+  mutate(
+    flood_prob = select(., starts_with("year_")) %>% rowMeans(na.rm = TRUE),
+    flood_count = select(., starts_with("year_")) %>% rowSums(na.rm = TRUE))
+
+# main dataset for this note
+fs_pin <- pin %>% 
+  left_join(conflict_score %>% select(admin3_pcode, battles, explosions_remote_violence, protests_and_riots, 
+                                      strategic_developments, violence_against_civilians, conflict_score = score_i, fatalities),
+            by = "admin3_pcode") %>% 
+  left_join(vulmmr %>% select(admin3_pcode = township_pcode, 
+                     area_sown_acres = all_area_sowed_mali, population_density),
+            by = "admin3_pcode") %>% 
+  left_join(floods_storm_surge %>% 
+              select(admin3_pcode, flood_prob, flood_count),
+            by = "admin3_pcode") %>% 
+  left_join(fsc %>%
+              filter(unique_beneficiaries == "Yes") %>%
+              group_by(admin3_pcode) %>%
+              summarise(beneficiaries_2021 = sum(beneficiaries),
+                        partners_2021 = n_distinct(implementing_partners)),
+            by = "admin3_pcode") %>% 
+  left_join(fsc %>% filter(date > "2021-09-01") %>%
+              group_by(admin3_pcode) %>%
+              summarise(ben_6_months = sum(beneficiaries)),
+            by = "admin3_pcode") %>% 
+  mutate(not_in_6months = ifelse(is.na(ben_6_months), 1, 0)) %>% 
+  mutate(fs_pin = ifelse(fs_pin > population_2021_proj, population_2021_proj, fs_pin)) %>% 
+  replace_na(list(conflict_score = 0, beneficiaries_2021 = 0, partners_2021 = 0, flood_prob = 0)) %>% 
+  mutate(conflict_ranking = dense_rank(desc(conflict_score)),
+         flood_ranking = dense_rank(desc(flood_prob)),
+         fs_pin_ranking = dense_rank(desc(fs_pin)),
+         fs_target_ranking = dense_rank(desc(fs_targeted)),
+         fs_pin_pc = fs_pin / sum(fs_pin),
+         pin_pop = fs_pin / population_2021_proj) %>% 
+  mutate(group = case_when(conflict_score >= mean(conflict_score) & population_density >= 500 ~ "A1",
+                           conflict_score >= mean(conflict_score) & population_density < 500 ~ "A2",
+                           conflict_score < mean(conflict_score) & population_density >= 500 ~ "B1",
+                           conflict_score < mean(conflict_score) & population_density < 500 ~ "B2")) 
+
+# show_col(viridis_pal(option = "cividis")(10))
+```
+
+
+
+## Introduction 
+
+As noted by the FSC's analysis of ACLED  conflict data, there was no discernible relationship between food security partners' presence and the incidence of conflict in 2021. This document intends to inform strategic and operational decision making and provides evidence intended to guide geographic prioritisation at the township level. For more information, please see the **[FSC's Conflict Analysis](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/)**.
+
+<br><br><br>
+
+## 1. Distribution of conflict events in Myanmar
+
+```{r confict-state-barplot}
+conflict_score %>% 
+  select(admin3_pcode, battles, explosions_remote_violence, protests_and_riots, 
+         strategic_developments, violence_against_civilians) %>% 
+  pivot_longer(cols = c(battles:violence_against_civilians), names_to = "event_type", values_to = "value") %>% 
+  left_join(fs_pin %>% select(admin3_pcode, state), by = "admin3_pcode") %>% 
+  group_by(state) %>% 
+  mutate(total_events = sum(value)) %>% 
+  ungroup() %>% 
+  mutate(state = fct_reorder(state, -total_events)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = state, y = value, fill = event_type)) + 
+  geom_col() +
+  scale_y_continuous(labels = comma) +
+  theme(axis.text.x = element_text(angle = 30, vjust = 0.7, hjust = 0.7)) +
+  labs(x = "", 
+       y = "Conflict events",
+       title = "2021 conflict events by state")
+
+#ggsave("event_type_state.png", dpi = 300, height = 5, width = 8, units = "in")
+```
+
+<br>
+
+Sagaing saw the highest number of conflict events as well as conflict as well as conflict-related fatalities in 2012. It experienced more than three times as many conflict-related fatalities than the next-highest state/region -- Magway. This is a significant shift in the pattern of conflict in Myanmar, which has traditionally revolved around Kachin, Rakhine and Shan. 
+
+Kayah, Chin and Sagaing had the highest number of conflict fatalities per capita in 2021. 
+
+<br>
+
+```{r conflict-fatalities-barplot}
+
+conflict_score %>% 
+  select(admin3_pcode, fatalities) %>% 
+  left_join(fs_pin %>% select(admin3_pcode, state, population_2021_proj), by = "admin3_pcode") %>% 
+  group_by(state) %>% 
+  summarise(fatalities = sum(fatalities), 
+            pop = sum(population_2021_proj)) %>% 
+  mutate(fatalities_pc = fatalities / pop) %>% 
+  mutate(state = fct_reorder(state, -fatalities)) %>% 
+  ggplot(aes(x = state, y = fatalities, fill = fatalities_pc)) +
+  geom_col() + 
+  scale_fill_viridis(option = "magma", direction = -1) +
+  scale_y_continuous(labels = comma) +
+  theme(axis.text.x = element_text(angle = 30, vjust = 0.7, hjust = 0.7)) +
+  labs(x = "",
+       y = "Number of fatalities", 
+       title = "Conflict fatalities by state",
+       subtitle ="and fatalities per capita", 
+       fill = "fatalities\nper capita")
+
+# ggsave("fatalities_state.png", dpi = 300, height = 5, width = 8, units = "in")
+  
+```
+
+<br>
+
+As can be seem from the barplots above, the distribution of conflict events and fatalities is not even, being skewed to a few states/regions. This is also evident at township level. In the scatterplot below, the averages of the number of conflict events and the number of fatalities at the township level have been marked by the dotted red lines, dividing the plot into four quadrants. 
+
+A requisite for any prioritisation score or index develop should be target, first and foremost, the townships in the upper right quadrant of the plot, which have the heaviest concentrations of conflict events and fatalities. For reference, 58 townships have both above-average numbers of conflict events and fatalities (upper-right quadrant) and 196 townships have both below-average numbers of conflict events and fatalities (bottom-left quadrant). 
+
+<br>
+
+```{r conflict-scatterplot}
+conflict_scatter <- conflict_score %>% 
+  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
+           violence_against_civilians) %>% 
+  left_join(fs_pin %>% select(state, township, partners_2021, admin3_pcode, population_density), by = "admin3_pcode") %>%
+  filter(state %in% c("Kayah", "Kayin", "Mon", "Tanintharyi", "Shan (South)")) %>% 
+  ggplot(aes(y = fatalities, x = total_events, colour = total_events, 
+             text = paste0(township, ",", "\n",
+                           state, ",", "\n",
+                           "events: ", total_events, ",", "\n",
+                           "fatalities: ", fatalities, ",", "\n",
+                           "partners: ", partners_2021))) +
+  geom_point(aes(size = fatalities)) +
+  scale_y_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300, 1000)) +
+  scale_x_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300)) +
+  scale_colour_viridis(option = "magma", direction = -1) +
+  geom_hline(aes(yintercept = mean(fatalities)), colour = "red", lty = 2) +
+  geom_vline(aes(xintercept = mean(total_events)), colour = "red", lty = 2) +
+  labs(x = "Conflict events", 
+       y = "Fatalities",
+       title = "Conflict events and fatalities by township", 
+       subtitle = "Means of both axes are marked by the dotted red line",
+       colour = "conflict\nevents", 
+       size = "fatalities") 
+
+ggplotly(conflict_scatter, tooltip = c("text")) %>% 
+  # layout(showlegend = FALSE, legend = list(font = list(size = 6))) %>% 
+  config(displayModeBar = FALSE) %>% 
+  layout(title = list(text = paste0("Conflict events and fatalities by township",
+                                    "<br>",
+                                    "<sup>",
+                                    "mouse over for details; means marked by red lines; fatalities marked by size","</sup>")))
+
+# ggsave("tsp_scatter_conflict.png", dpi = 300, height = 5, width = 8, units = "in")
+
+```
+
+<br><br>
+
+### 1.1 Updating the MIMU-HARP Conflict Index
+
+To aid in prioritisation, a conflict score was calculated, making use of available conflict data. At its most basic level, the conflict score is the average of the normalised counts of battles, explosions and remote violence, violence against civilians, strategic developments, non-peaceful protests and riots and conflict-related fatalities. For more details, please see the  **[FSC's notes on updating the MIMU-HARP Conflict Index](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/#revisiting-the-mimu-harp-conflict-index)**. This score will be now be used as a shorthand for conflict incidence in Myanmar. 
+
+It is additionally recognised that different types of townships necessitate different programming options. The types of interventions suited to urban centres might not be relevant to rural areas. As part of this initial prioritisation tool, townships have been split into four simple groups (A1, A2, B1 and B2), based on their conflict score and population density.
+
+This grouping separates all 330 townships along two criteria -- high or low conflict score (A or B) and high or low population density (1 or 2). Groups A1 and A2 have above average conflict scores. These 107 townships should be prioritised for humanitarian interventions. Recalling the scatterplot above, the colours have now been updated to reflect the prioritisation group. From the plot below that whilst group A1 have populations that are easier to access (having higher population density), the incidence of conflict is higher overall in group A2, with the numbers of conflict-related fatalities being much higher. This quick-and-dirty prioritisation has managed to exclude all the townships in bottom-left quadrant (least conflict-affected) from groups A1 and A2. 
+
+<br>
+
+
+```{r scatterplot-groups}
+scatter_groups <- fs_pin %>% 
+  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
+           violence_against_civilians) %>% 
+  filter(state %in% c("Kayah", "Kayin", "Mon", "Tanintharyi", "Shan (South)")) %>% 
+  ggplot(aes(x = total_events, y = fatalities, colour = group, 
+             text = paste0(township, ",", "\n",
+                           state, ",", "\n",
+                           "group: ", group, ",", "\n",
+                           "events: ", total_events, ",", "\n",
+                           "fatalities: ", fatalities, ",", "\n",
+                           "partners: ", partners_2021))) +
+  geom_point(aes(size = fatalities), alpha = 0.85) +
+  scale_y_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300, 1000)) +
+  scale_x_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300)) +
+  scale_colour_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
+  # scale_colour_viridis_d(option = "cividis") +
+  geom_hline(aes(yintercept = mean(fatalities, na.rm = TRUE)), colour = "red", lty = 2) +
+  geom_vline(aes(xintercept = mean(total_events, na.rm = TRUE)), colour = "red", lty = 2) +
+  labs(x = "Conflict events", 
+       y = "Fatalities",
+       title = "Conflict events and fatalities by prioritisation group", 
+       subtitle = "Means of both axes are marked by the dotted red line",
+       colour = "group", 
+       size = "fatalities") 
+
+ggplotly(scatter_groups, tooltip = c("text")) %>% 
+  # layout(showlegend = FALSE, legend = list(font = list(size = 6))) %>% 
+  config(displayModeBar = FALSE) %>% 
+  layout(title = list(text = paste0("Conflict events and fatalities by prioritisation group",
+                                    "<br>",
+                                    "<sup>",
+                                    "mouse over for details; means marked by red lines; fatalities marked by size","</sup>")))
+
+```
+
+<br>
+
+Groups A1 and A2 can be distinguished by their population density, with the average population density in group A1 being more than 100 times higher than in group A2. The average PIN per township is slightly higher in group A1 than in group A2. The scatterplot below shows townships by the number of people in need (x-axis) and the population density (y-axis), with the colours reflecting which group each belongs to:
+
+<br>
+
+
+```{r}
+pop_scatter <- fs_pin %>% 
+  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
+           violence_against_civilians) %>%
+  filter(state %in% c("Kayah", "Kayin", "Mon", "Tanintharyi", "Shan (South)")) %>%
+  ggplot(aes(x = fs_pin, y = population_density, colour = group,
+             text = paste0(township, ",", "\n",
+                           state, ",", "\n",
+                           "group: ", group, ",", "\n",
+                           "events: ", total_events, ",", "\n",
+                           "fatalities: ", fatalities, ",", "\n",
+                           "partners: ", partners_2021))) +
+  geom_point(aes(size = conflict_score), alpha = 0.85) +
+  scale_colour_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
+  # scale_colour_viridis_d(option = "cividis") +
+  scale_x_continuous(labels = comma, trans = "log10") +
+  scale_y_continuous(labels = comma_format(accuracy = 1), trans = "log10") +
+  geom_hline(aes(yintercept = mean(population_density, na.rm = TRUE)), colour = "red", lty = 2) +
+  geom_vline(aes(xintercept = mean(fs_pin, na.rm = TRUE)), colour = "red", lty = 2) +
+  labs(x = "People in need", 
+       y = "Population density",
+       title = "People in need and population density by prioritisation group", 
+       subtitle = "Means of both axes are marked by the dotted red line",
+       colour = "group", 
+       size = "conflict\nscore") 
+
+ggplotly(pop_scatter, tooltip = c("text")) %>% 
+  # layout(showlegend = FALSE, legend = list(font = list(size = 6))) %>% 
+  config(displayModeBar = FALSE) %>% 
+  layout(title = list(text = paste0("People in need and population density by prioritisation group",
+                                    "<br>",
+                                    "<sup>",
+                                    "mouse over for details; means marked by red lines; conflict score marked by size","</sup>")))
+```
+
+<br>
+
+The table below provides some summary statistics for each of the four groups. Included are the PIN and population targeted within the townships in each group, the average conflict score (higher conflict scores indicate a higher incidence of conflict), the average population density and the number of townships within each group: 
+
+<br>
+
+```{r table-summary-stats-group}
+fs_pin %>%
+  filter(state %in% c("Kayah", "Kayin", "Mon", "Tanintharyi", "Shan (South)")) %>%
+  group_by(group) %>% 
+  summarise(PIN = sum(fs_pin), 
+            target = sum(fs_targeted),
+            conflict_score = mean(conflict_score),
+            ppl_per_km2 = mean(population_density),
+            townships = n()) %>% 
+  mutate_at(vars(c(conflict_score)), ~round(., digits = 3)) %>% 
+  mutate_at(vars(c(PIN, ppl_per_km2, target)), ~ round(.)) %>% 
+  kable(caption = "Summary statistics by township group", format.args = list(big.mark = ",")) %>% 
+  kable_classic_2("striped") %>% 
+  footnote(footnote_as_chunk = TRUE, threeparttable = TRUE, 
+           general = "Groups A1 and A2 have above average conflict scores; groups A1 and B1 have the above average population densities. Townships in groups A1 and A2 should be prioritised over the others.") 
+
+# %>%
+#  save_kable(file = "summary_stats_groups.png", zoom = 2)
+  
+```
+
+<br><br>
+
+### 1.2 Maps of conflict scores and prioritisation group
+
+```{r map-conflict-score, fig.height=9}
+
+fs_pin %>% 
+  right_join(pcode3_shape, by = "admin3_pcode") %>% 
+  st_as_sf() %>% 
+  ggplot() +
+  geom_sf(aes(fill = conflict_score), size = 0.1) + 
+  geom_sf(data = pcode1_shape, alpha = 0, colour = "black", size = 0.5) + 
+  scale_fill_viridis_c(option = "magma", direction = -1) +
+  theme_void() + 
+  labs(title = "Conflict score by township 2021",
+       caption = "Data source: ACLED; acleddata.com",
+       fill = "Conflict\nscore") +
+  theme(plot.caption=element_text(hjust = 0.5), 
+        plot.background = element_rect(fill = "white", colour = NA)) +
+
+fs_pin %>% 
+  left_join(pcode3_shape, by = "admin3_pcode") %>% 
+  st_as_sf() %>% 
+  ggplot() + 
+  geom_sf(aes(fill = group), size = 0.1, colour = "gray20") + 
+  geom_sf(data = pcode1_shape, alpha = 0, colour = "black", size = 0.5) +
+  scale_fill_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
+  # scale_fill_viridis_d(end = 0.9, option = "cividis") +
+  theme_void() +
+  labs(title = "Townships by prioritisation group", 
+       fill = "priori-\ntisation\ngroup",
+       caption = "Data source: ACLED; acleddata.com and FSC calculations") +
+  theme(plot.caption=element_text(hjust = 0.5), 
+        plot.background = element_rect(fill = "white", colour = NA))  
+  
+# ggsave("conflict_score_map.png", dpi = 300, height = 12, width = 7, units = "in")
+```
+
+<br><br>
+
+### 1.3 Reference table for conflict variables
+
+Below is an interactive reference table for the various types of conflict events by township. It also includes the overall conflict score and prioritisation groups. The search bar can be used to find specific townships, or any of the columns may be sorted according to ascending or descending values. The table currently shows townships in descending order of conflict score. 
+
+<br>
+
+```{r}
+fs_pin %>% 
+  filter(state %in% c("Kayah", "Kayin", "Mon", "Tanintharyi", "Shan (South)")) %>%
+  select(state, township, pop_2021 = population_2021_proj, ppl_km2 = population_density, 
+         PIN = fs_pin, target = fs_targeted,
+         group, conflict_score, fatalities,
+         battles, explosions_remote_violence, protests_and_riots, strategic_developments, violence_against_civilians,
+         admin3_pcode) %>% 
+  arrange(desc(conflict_score)) %>% 
+  datatable(filter = list(position = "top", clear = FALSE),
+            options = list(pageLength = 10, scrollX = TRUE),
+            caption = htmltools::tags$caption(style = "caption-side: top;
+                                              text-align: center; font-size: 140%;",
+                                              "2021 conflict indicators by township")) %>% 
+  formatRound(c("pop_2021", "ppl_km2", "target", "PIN"), digits = 0) %>% 
+  formatRound(c("conflict_score"), digits = 2)
+ 
+```
+
+<br><br><br>
+
+
+## 2. Distribution of flood risk in Myanmar
+
+
+### 2.1 Historical flood data 
+
+In light of the impending monsoon season, the probability that a township will be affected by a major flood or cylconic event has been calculated. Major floods since 2008 have been factored into this calculation. 
+
+For the moment, conflict incidence and flood and cyclone risk will be evaluated separately. Flood and storm surge risk exist as probabilities for the moment; this might change were severe flooding to occur in 2022. 
+
+<br>
+
+```{r barplot-flood-risk}
+floods_storm_surge %>% 
+  select(starts_with("year_"), admin3_pcode) %>% 
+  pivot_longer(cols = c(-admin3_pcode), names_to = "floods", values_to = "value") %>% 
+  mutate(floods = str_remove_all(floods, "year_")) %>% 
+  group_by(floods) %>% 
+  filter(value == TRUE) %>% 
+  summarise(townships_affected = n()) %>% 
+  mutate(floods = fct_rev(floods)) %>% 
+  ggplot(aes(x = townships_affected, y = floods, fill = floods)) + 
+  geom_col() +  
+  theme(legend.position = "none") +
+  labs(y = "", 
+       x = "Number of townships affected", 
+       title = "Townships affected by floods and storm surges (2008-2021)")
+
+ # ggsave("by_floods.png", dpi = 300, height = 5, width = 8, units = "in")
+```
+
+<br>
+
+Based on this data, a score was calculated for each township based on how many times it had been affected by floods since 2008. The table below also summarises the number of people in need (2022). `r fs_pin %>% filter(flood_count > 4) %>% {sum(.$fs_pin)} %>% round() %>% format(big.mark = ",")` people live in townships that have flooded more than 5 times since 2008. 
+
+```{r}
+fs_pin %>% 
+  replace_na(list(flood_count = 0)) %>% 
+  # mutate(flood_count = ifelse(flood_count > 4, "5-9", flood_count)) %>% 
+  group_by(flood_count) %>% 
+  summarise(townships = n(),
+            people_in_need = round(sum(fs_pin), digits = 0)) %>% 
+  arrange(desc(flood_count)) %>% 
+  kable(caption = "Summary statistics by number of floods (2008-2021)", format.args = list(big.mark = ",")) %>% 
+  kable_classic_2("striped", full_width = FALSE)
+
+```
+
+<br><br>
+
+### 2.2 Map of flood risk 
+
+The map below shows the probability of each township being affected by floods. The areas with the greatest risk of flooding are in Mon, near the mouth of the Sittaung River and the Gulf of Mottama and those along the Ayeyarwady River, and to a lesser extent, along the Chindwin River. 
+
+<br>
+
+```{r map-floods, fig.height = 12}
+
+fs_pin %>% 
+  left_join(pcode3_shape, by = "admin3_pcode") %>% 
+  st_as_sf() %>% 
+  ggplot() +
+  geom_sf(size = 0.1, aes(fill = flood_prob)) +
+  geom_sf(data = pcode1_shape, size = 0.5, alpha = 0, colour = "gray20") +
+  scale_fill_viridis(option = "plasma", direction = -1, label = percent_format(accuracy = 1)) +
+  theme_void() +
+  theme(plot.background = element_rect(fill = "white", colour = NA),
+        plot.caption = element_text(hjust = 0.5)) +
+  labs(title = "Flood risk in Myanmar (2008-2021)", 
+       fill = "flood\nrisk", 
+       caption =  "Data source: MIMU and UNDP")
+
+# ggsave("flood_risk.png", dpi = 300, height = 12, width = 7, units = "in")
+```
+
+<br><br>
+
+### 2.3 Reference table for flood risk 
+
+Below is an interactive reference table for flood risk by township. It includes the number of times since 2008 a township has been affected by flooding (flood_count) and the probability of flooding (flood_risk). Similar to the interactive table in the previous chapter, the search bar can be used to find specific townships and any of the columns may be sorted according to ascending or descending values. The table currently shows townships sorted in descending order of flood risk.
+
+<br>
+
+
+```{r}
+fs_pin %>% 
+  filter(state %in% c("Kayah", "Kayin", "Mon", "Tanintharyi", "Shan (South)")) %>%
+  select(state, township, pop_2021 = population_2021_proj, ppl_km2 = population_density, 
+         PIN = fs_pin, target = fs_targeted,
+         flood_risk = flood_prob, flood_count,
+         admin3_pcode) %>% 
+  arrange(desc(flood_risk)) %>% 
+  datatable(filter = list(position = "top", clear = FALSE),
+            options = list(pageLength = 10, scrollX = TRUE),
+            caption = htmltools::tags$caption(style = "caption-side: top;
+                                              text-align: center; font-size: 140%;",
+                                              "Flood risk by township")) %>% 
+  formatRound(c("pop_2021", "ppl_km2", "target", "PIN"), digits = 0) %>% 
+  formatRound(c("flood_risk"), digits = 2)
+ 
+```

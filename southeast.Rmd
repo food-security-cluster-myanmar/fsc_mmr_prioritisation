@@ -1,0 +1,45 @@
+---
+title: "Untitled"
+output: html_document
+date: '2022-04-05'
+---
+
+
+```{r conflict-scatterplot}
+conflict_scatter <- conflict_score %>% 
+  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
+           violence_against_civilians) %>% 
+  left_join(fs_pin %>% select(state, township, partners_2021, admin3_pcode, population_density), by = "admin3_pcode") %>% 
+  filter(state %in% c("Kayah", "Kayin", "Mon", "Shan (South)", "Tanintharyi")) %>% 
+  ggplot(aes(y = fatalities, x = total_events, colour = total_events, 
+             text = paste0(township, ",", "\n",
+                           state, ",", "\n",
+                           "events: ", total_events, ",", "\n",
+                           "fatalities: ", fatalities, ",", "\n",
+                           "partners: ", partners_2021))) +
+  geom_point(aes(size = fatalities)) +
+  scale_y_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300, 1000)) +
+  scale_x_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300)) +
+  scale_colour_viridis(option = "magma", direction = -1) +
+  geom_hline(aes(yintercept = mean(fatalities)), colour = "red", lty = 2) +
+  geom_vline(aes(xintercept = mean(total_events)), colour = "red", lty = 2) +
+  labs(x = "Conflict events", 
+       y = "Fatalities",
+       title = "Conflict events and fatalities by township", 
+       subtitle = "Means of both axes are marked by the dotted red line",
+       colour = "conflict\nevents", 
+       size = "fatalities") 
+
+ggplotly(conflict_scatter, tooltip = c("text")) %>% 
+  # layout(showlegend = FALSE, legend = list(font = list(size = 6))) %>% 
+  config(displayModeBar = FALSE) %>% 
+  layout(title = list(text = paste0("Conflict events and fatalities by township",
+                                    "<br>",
+                                    "<sup>",
+                                    "mouse over for details; means marked by red lines; fatalities marked by size","</sup>")))
+```
+
+```{r}
+fs_pin %>% count(state)
+```
+

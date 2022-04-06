@@ -294,7 +294,7 @@ conflict_scatter <- conflict_score %>%
                            "events: ", total_events, ",", "\n",
                            "fatalities: ", fatalities, ",", "\n",
                            "partners: ", partners_2021))) +
-  geom_point(aes(size = fatalities)) +
+  geom_point(aes(size = fatalities), alpha = 0.85) +
   scale_y_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300, 1000)) +
   scale_x_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300)) +
   scale_colour_viridis(option = "magma", direction = -1) +
@@ -327,7 +327,7 @@ To aid in prioritisation, a conflict score was calculated, making use of availab
 
 It is additionally recognised that different types of townships necessitate different programming options. The types of interventions suited to urban centres might not be relevant to rural areas. As part of this initial prioritisation tool, townships have been split into four simple groups (A1, A2, B1 and B2), based on their conflict score and population density.
 
-This grouping separates all 330 townships along two criteria -- high or low conflict score (A or B) and high or low population density (1 or 2). Groups A1 and A2 have above average conflict scores. These 107 townships should be prioritised for humanitarian interventions. Recalling the scatterplot above, the colours have now been updated to reflect the prioritisation group. From the plot below that whilst group A1 have populations that are easier to access (having higher population density), the incidence of conflict is higher overall in group A2, with the numbers of conflict-related fatalities being much higher. This quick-and-dirty prioritisation has managed to exclude all the townships in bottom-left quadrant (least conflict-affected) from groups A1 and A2. 
+This grouping separates all 330 townships along two criteria -- high or low conflict score (A or B) and high or low population density (1 or 2). Groups A1 and A2 have above average conflict scores. These 107 townships should be prioritised for humanitarian interventions. Recalling the scatterplot above, the colours have now been updated to reflect the prioritisation group. From the plot below that whilst group A1 have populations that are easier to access (having higher population density), the incidence of conflict is higher overall in group A2, with the numbers of conflict-related fatalities being much higher. This quick-and-dirty prioritisation has managed to exclude almost all the townships in bottom-left quadrant (least conflict-affected) from groups A1 and A2. 
 
 <br>
 
@@ -343,7 +343,7 @@ scatter_groups <- fs_pin %>%
                            "events: ", total_events, ",", "\n",
                            "fatalities: ", fatalities, ",", "\n",
                            "partners: ", partners_2021))) +
-  geom_point(aes(size = fatalities), alpha = 0.85) +
+  geom_point(aes(size = fatalities), alpha = 0.8) +
   scale_y_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300, 1000)) +
   scale_x_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300)) +
   scale_colour_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
@@ -385,7 +385,7 @@ pop_scatter <- fs_pin %>%
                            "events: ", total_events, ",", "\n",
                            "fatalities: ", fatalities, ",", "\n",
                            "partners: ", partners_2021))) +
-  geom_point(aes(size = conflict_score), alpha = 0.85) +
+  geom_point(aes(size = conflict_score), alpha = 0.8) +
   scale_colour_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
   # scale_colour_viridis_d(option = "cividis") +
   scale_x_continuous(labels = comma, trans = "log10") +
