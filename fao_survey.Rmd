@@ -1,0 +1,224 @@
+---
+title: "Untitled"
+output: html_document
+date: '2022-04-06'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(haven)
+library(psych)
+library(skimr)
+library(mdepriv)
+library(broom)
+```
+
+
+```{r}
+pcodes <- read_excel("Myanmar PCodes Release_9.3_Jan2021_(StRgn_Dist_Tsp_Town_Ward_VT).xlsx",
+                     sheet = "03_Township") 
+
+acled2 <- read_csv("acled.csv") %>% 
+  left_join(pcodes %>% select(admin3_pcode = Tsp_Pcode, 
+                             admin2_pcode = `District/SAZ_Pcode`, admin2 = `District/SAZ_Name_Eng`),
+            by = "admin3_pcode") %>% 
+  rename(admin2 = admin2.y) %>% 
+  filter(year == 2021) %>% 
+  filter(event_date < "2021-09-01")
+
+## redoing the conflict score at the district level
+
+conflict_df <- acled2 %>% 
+  # do you really need this step since you're using Betti-Verma
+  mutate(event_type = case_when(event_type == "Protests" ~ "Protests_and_Riots",
+                                event_type == "Riots" ~ "Protests_and_Riots", 
+                                TRUE ~ event_type)) %>% 
+  filter(year == 2021 & sub_event_type != "Peaceful protest") %>%
+  group_by(admin2_pcode, event_type) %>% 
+  summarise(count = n(), .groups = "drop") %>%  
+  pivot_wider(names_from = event_type, values_from = count) %>% 
+  clean_names() %>% 
+  replace_na(list(battles = 0, explosions_remote_violence = 0, violence_against_civilians = 0,
+                  strategic_developments = 0, protests_and_riots = 0)) %>% 
+  # mutate(total_events = rowSums(across(where(is.numeric)), na.rm = TRUE)) %>% 
+  left_join(acled2 %>% 
+              filter(year == 2021) %>% 
+              group_by(admin2_pcode) %>% 
+              summarise(fatalities = sum(fatalities)), by = "admin2_pcode") %>% 
+  ungroup()
+  
+index_shares <- conflict_df %>%   
+  mutate_at(vars(c(battles, explosions_remote_violence, violence_against_civilians, fatalities,
+                   strategic_developments, protests_and_riots)), 
+           scale) %>%  
+  mutate_at(vars(c(battles, explosions_remote_violence, violence_against_civilians, fatalities,
+                   strategic_developments, protests_and_riots)), 
+           funs((. - min(., na.rm = T))/(max(., na.rm = T) - min(., na.rm = T)))) %>% 
+  mdepriv(c("battles", "explosions_remote_violence", "violence_against_civilians", "fatalities", "strategic_developments", "protests_and_riots"),
+          method = "bv", output = "all")
+
+conflict_score <- conflict_df %>% 
+  left_join(index_shares$data %>% 
+              select(admin2_pcode, 
+                     score_i,
+                     index_battles = battles, 
+                     index_explosions_remote_violence = explosions_remote_violence,
+                     index_violence_against_civilians = violence_against_civilians, 
+                     index_fatalities = fatalities, 
+                     index_strategic_developments = strategic_developments, 
+                     index_protests_and_riots = protests_and_riots), by = "admin2_pcode") %>% 
+  mutate(env_battles = battles / max(battles), 
+         env_explosions_remote_violence = explosions_remote_violence / max(explosions_remote_violence),
+         env_violence_against_civilians = violence_against_civilians / max(violence_against_civilians), 
+         env_fatalities = fatalities / max(fatalities), 
+         score_env = (env_battles + env_explosions_remote_violence + 
+                        env_violence_against_civilians + env_fatalities) / 4) %>% 
+  left_join(acled2 %>% 
+              distinct(admin1, admin2, admin2_pcode), by = "admin2_pcode")
+
+fao_survey <- read_dta("MMR_R2HQ_cleanedWt_final.dta") %>% 
+  zap_labels()
+
+fao <- fao_survey %>% select(survey_id, admin1_pcode = adm1_pcode, admin3_pcode = adm3_pcode, 
+               fcs = fcsprwt, hhfcs = HHFCS, lhcsi = lhcsi_max_ag,
+               need, income_main_amount, income_sec_amount, income_third_amount,
+               hh_size, hhexp = hhexptotal30d, expfood = expensefood30d) %>% 
+  left_join(pcodes %>% select(admin3_pcode = Tsp_Pcode, 
+                             admin2_pcode = `District/SAZ_Pcode`, admin2 = `District/SAZ_Name_Eng`),
+            by = "admin3_pcode")
+```
+
+### EDA
+
+```{r}
+glimpse(fao_survey)
+```
+
+
+
+```{r}
+
+fao %>% 
+  mutate(lhcsi_dbl = case_when(lhcsi == "None" ~ 4,
+                               lhcsi == "Stress" ~ 3,
+                               lhcsi == "Crisis" ~ 2, 
+                               lhcsi == "Emergency" ~ 1)) %>% 
+  #  mutate_at(vars(fcs, hhfcs, lhcsi), ~ as.numeric(.)) %>%
+  group_by(admin2_pcode) %>%
+  summarise(mean_fcs = mean(fcs, na.rm = TRUE), 
+            mean_hhfcs = mean(hhfcs, na.rm = TRUE),
+            mean_lhcsi = mean(lhcsi_dbl, na.rm = TRUE)) %>% 
+  left_join(conflict_score %>% select(admin2_pcode, score_i, 
+                                      index_battles, index_explosions_remote_violence,
+                                      index_strategic_developments, index_protests_and_riots, 
+                                      index_fatalities)) %>% 
+  select(-admin2_pcode) %>% 
+  pairs.panels(smooth = TRUE,      # If TRUE, draws loess smooths
+               scale = FALSE,      # If TRUE, scales the correlation text font
+               density = TRUE,     # If TRUE, adds density plots and histograms
+               ellipses = FALSE,   # If TRUE, draws ellipses
+               method = "pearson", # Correlation method (also "spearman" or "kendall")
+               pch = 8,            # pch symbol
+               lm = TRUE,          # If TRUE, plots linear fit rather than the LOESS (smoothed) fit
+               cor = TRUE,         # If TRUE, reports correlations
+               jiggle = FALSE,     # If TRUE, data points are jittered
+               factor = 2,         # Jittering factor
+               hist.col = 4,       # Histograms color
+               stars = TRUE,       # If TRUE, adds significance level with stars
+               ci = FALSE,         # If TRUE, adds confidence intervals
+               main = "title")
+```
+### variation 
+
+```{r}
+fao %>% 
+  mutate(lhcsi_dbl = case_when(lhcsi == "None" ~ 4,
+                               lhcsi == "Stress" ~ 3,
+                               lhcsi == "Crisis" ~ 2, 
+                               lhcsi == "Emergency" ~ 1)) %>% 
+  #  mutate_at(vars(fcs, hhfcs, lhcsi), ~ as.numeric(.)) %>%
+  group_by(admin2_pcode) %>%
+  summarise(mean_fcs = mean(fcs, na.rm = TRUE), 
+            mean_hhfcs = mean(hhfcs, na.rm = TRUE),
+            mean_lhcsi = mean(lhcsi_dbl, na.rm = TRUE)) %>% 
+  left_join(conflict_score %>% select(admin2_pcode, 
+                                      battles, explosions_remote_violence,
+                                      strategic_developments, protests_and_riots, 
+                                      fatalities)) %>% 
+  select(-admin2_pcode, -mean_fcs, -mean_lhcsi) %>% 
+  lm(mean_hhfcs ~ ., data = .) %>% 
+  anova() %>% 
+  tidy() %>% 
+  mutate(pct_variation = sumsq / sum(sumsq)) %>% 
+  arrange(desc(pct_variation))
+```
+
+```{r}
+fao %>% 
+  mutate(lhcsi_dbl = case_when(lhcsi == "None" ~ 4,
+                               lhcsi == "Stress" ~ 3,
+                               lhcsi == "Crisis" ~ 2, 
+                               lhcsi == "Emergency" ~ 1)) %>% 
+  #  mutate_at(vars(fcs, hhfcs, lhcsi), ~ as.numeric(.)) %>%
+  group_by(admin2_pcode) %>%
+  summarise(mean_fcs = mean(fcs, na.rm = TRUE), 
+            mean_hhfcs = mean(hhfcs, na.rm = TRUE),
+            mean_lhcsi = mean(lhcsi_dbl, na.rm = TRUE)) %>% 
+  left_join(conflict_score %>% select(admin2_pcode, 
+                                      battles, explosions_remote_violence,
+                                      strategic_developments, protests_and_riots, 
+                                      fatalities)) %>%
+  select(-admin2_pcode, -mean_fcs, -mean_lhcsi) %>% 
+  lm(mean_hhfcs ~ ., data = .) %>% 
+  summary()
+  tidy()
+```
+
+```{r}
+
+fao %>% left_join(acled2 %>%
+                    filter(event_type == "Explosions/Remote violence") %>%
+                    group_by(admin3_pcode, sub_event_type) %>% 
+                    summarise(count = n()) %>% 
+                    pivot_wider(names_from = sub_event_type, values_from = count, values_fill = 0) %>% 
+                    clean_names(), 
+                  by = "admin3_pcode") %>%
+  left_join(acled2 %>% 
+              group_by(admin3_pcode) %>% 
+              summarise(fatalities = sum(fatalities)), 
+            by = "admin3_pcode") %>% 
+  lm(hhfcs ~ air_drone_strike + grenade + remote_explosive_landmine_ied + shelling_artillery_missile_attack + fatalities, 
+     data = .) %>% 
+  summary()
+
+acled2 %>% count(event_type)
+```
+
+### can you not do this while you're falling asleep?
+
+```{r}
+fao %>% 
+  ggplot(aes(x = fcs)) + 
+  geom_histogram()
+
+fao %>% count(hhfcs)
+
+fao_survey %>% glimpse()
+
+fao_survey %>% count(HHFCSClass)
+```
+
+
+```{r}
+acled2 %>% 
+  sjmisc::to_dummy(sub_event_type, suffix = "label") %>% 
+  bind_cols(acled2) %>% 
+  clean_names() %>% 
+  group_by(admin3_pcode) %>% 
+  summarise(across(starts_with("sub_event_type_"), ~ sum(.x, na.rm = TRUE))) %>% 
+  right_join(fao, by = "admin3_pcode") %>% 
+  left_join(acled2 %>% group_by(admin3_pcode) %>% summarise(fatalities = sum(fatalities)), by = "admin3_pcode") %>% 
+  select(hhfcs, fatalities, contains("sub_event_type"))
+  
+```
+
