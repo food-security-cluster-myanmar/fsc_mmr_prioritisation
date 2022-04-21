@@ -142,4 +142,55 @@ fs_pin %>%
   hc_tooltip(useHTML = TRUE, headerformat = "", pointFormat = tltip) %>% 
   hc_size(height = 700)
 
-glimpse(fs_pin)
+survey %>% 
+  mutate(food_expense_mmk = income_main_amount * expense_food) %>%
+  ggplot(aes(x = hhfcs_inv, y = food_expense_mmk)) +
+  geom_point() + 
+  geom_smooth(method = "lm") + 
+  scale_y_continuous(trans = "log10") + 
+  labs(x = "Food consumption score (inverse)",
+       y = "Household food expenditures (MMK)", 
+       title = "Relationship between ")
+
+survey %>% 
+  count(state) %>% 
+  mutate(state = fct_reorder(state, n)) %>% 
+  ggplot(aes(x = n, y = state, fill = state)) + 
+  geom_col() +
+  theme(legend.position = "none") + 
+  labs(x = "Number of households", 
+       y = "",
+       title = "Households interviewed by state, WFP-FAO survey")
+
+survey %>% 
+  filter(!is.na(food_expenses_mmk)) %>% 
+  select(contains("shocks_"), food_expenses_mmk, fies_raw_range, hhfcs_inv, csi_weighted, fs_score) %>% 
+  select(-shocks_none) %>% 
+  cor(method = c("pearson")) %>% 
+  corrplot(type = "upper", col = brewer.pal(n = 8, name = "RdYlBu"),
+           addCoef.col = 1, number.cex = 0.5,
+           tl.srt = 35, tl.cex = 0.75,
+           title = "Correlations between shocks and food security indicators \n",  mar=c(0,0,2,0), diag = FALSE)
+
+
+survey_long %>%  
+  filter(str_detect(var, "shocks_|hoh_|rural|not_improved|agri_activity|income_ms_|edu_") |
+           var %in% c("priority")) %>% 
+  lm_prep_long() %>% 
+  pivot_longer(cols = -priority, names_to = "var", values_to = "value") %>% 
+  group_by(var, priority) %>% 
+  summarise(mean = mean(value)) %>% 
+  mutate(priority = recode(priority, `0` = "not_priority", `1` = "priority")) %>% 
+  ggplot(aes(x = mean, y = reorder(var, mean), fill = mean)) + 
+  geom_col() + 
+  scale_fill_viridis(option = "plasma") +
+  geom_text(aes(label = scales::percent(round(mean, digits = 2))), size = 3, hjust = -0.1) + 
+  labs(x = "Mean", y = "", 
+       title = "Prevalence of environmental and demographic indicators") + 
+  theme(legend.position = "none", 
+        axis.text.y = element_text(size = 8),
+        axis.title.x = element_text(size = 8, face = "bold"), 
+        plot.title = element_text(size = 10)) +
+  expand_limits(x = 1.05) +
+  facet_wrap(~priority) + 
+  scale_y_reordered()
