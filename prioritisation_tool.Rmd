@@ -124,21 +124,15 @@ mode <- function(x) {
 # reading in PIN
 pin <- read_excel("hpc_pin.xlsx")
 
-# reading in townships from geoadmins 
-townships <- read_excel("C:/Users/seany/Downloads/R/mmr_5w_initial_observations/FSC 5W 2021 - GEOADMINS_final 19.xlsx",
-           sheet = "GEOADMINS") %>% 
-  clean_names() %>% 
-  select(admin1pcode_4:admin3pcode) %>% 
-  rename(admin1_pcode = admin1pcode_4,
-         admin3_pcode = admin3pcode,
-         state_name   = state_5,
-         township_name  = county) %>% 
-  remove_empty() %>% 
-  mutate(admin3_pcode = ifelse(state_name == "Magway" & township_name == "Minhla", "MMR009013", admin3_pcode),
-         admin3_pcode = ifelse(state_name == "Yangon" & township_name == "Htantabin", "MMR013006", admin3_pcode))
-
+# pcodes
 pcodes <- read_excel("Myanmar PCodes Release_9.3_Jan2021_(StRgn_Dist_Tsp_Town_Ward_VT).xlsx",
-                     sheet = "03_Township") 
+                     sheet = "03_Township") %>%
+  rename(admin1_pcode = SR_Pcode,
+         state = SR_Name_Eng,
+         admin3_pcode = Tsp_Pcode,
+         township = Township_Name_Eng,
+         admin2_pcode = `District/SAZ_Pcode`, 
+         district = `District/SAZ_Name_Eng`)
 
 # shapefiles
 pcode3_shape <- st_read("C:/Users/seany/Downloads/R/acled/mmr_polbnda_adm3_mimu_250k/mmr_polbnda_adm3_mimu_250k.shp", 
@@ -169,7 +163,7 @@ vulmmr <- read_excel("C:/Users/seany/Downloads/R/mmr_5w_initial_observations/Dat
   select(-c(private_sector_development_2014_2015, protection_2010_2015, shelter_2010_2015, wash_2010_2015))
 
 # reading in conflict score
-conflict_score <- read_csv("conflict_score.csv")
+conflict_score <- read_csv("conflict_score2.csv")
 
 # show_col(viridis_pal()(10))
 
@@ -199,7 +193,8 @@ floods_storm_surge <- read_excel("Flood_Affected_Township_(2008-2021) (1).xlsx")
 # main dataset for this note
 fs_pin <- pin %>% 
   left_join(conflict_score %>% select(admin3_pcode, battles, explosions_remote_violence, protests_and_riots, 
-                                      strategic_developments, violence_against_civilians, conflict_score = score_i, fatalities),
+                                      strategic_developments, violence_against_civilians, 
+                                      conflict_score = score_i, fatalities),
             by = "admin3_pcode") %>% 
   left_join(vulmmr %>% select(admin3_pcode = township_pcode, 
                      area_sown_acres = all_area_sowed_mali, population_density),
@@ -226,10 +221,10 @@ fs_pin <- pin %>%
          fs_target_ranking = dense_rank(desc(fs_targeted)),
          fs_pin_pc = fs_pin / sum(fs_pin),
          pin_pop = fs_pin / population_2021_proj) %>% 
-  mutate(group = case_when(conflict_score >= mean(conflict_score) & population_density >= 500 ~ "A1",
-                           conflict_score >= mean(conflict_score) & population_density < 500 ~ "A2",
-                           conflict_score < mean(conflict_score) & population_density >= 500 ~ "B1",
-                           conflict_score < mean(conflict_score) & population_density < 500 ~ "B2")) 
+  mutate(group = case_when(conflict_score >= mean(conflict_score) & population_density >= 1000 ~ "A1",
+                           conflict_score >= mean(conflict_score) & population_density < 1000 ~ "A2",
+                           conflict_score < mean(conflict_score) & population_density >= 1000 ~ "B1",
+                           conflict_score < mean(conflict_score) & population_density < 1000 ~ "B2")) 
 
 # should i just read in the whole survey dataset here? or just read in the csv
 # i don't really know if people are interested in the cleaning process
@@ -239,9 +234,7 @@ fao_survey <- read_dta("MMR_R2HQ_cleanedWt_final.dta") %>%
 
 survey <- fao_survey %>% 
   rename(admin3_pcode = adm3_pcode) %>% 
-  left_join(pcodes %>% select(admin3_pcode = Tsp_Pcode, township = `Township_Name_Eng`,
-                             admin2_pcode = `District/SAZ_Pcode`, admin2 = `District/SAZ_Name_Eng`,
-                             state = `SR_Name_Eng`, admin1_pcode = SR_Pcode),
+  left_join(pcodes %>% select(admin3_pcode, township, state, admin1_pcode, district, admin2_pcode),
             by = "admin3_pcode") %>% 
   mutate_at(vars(cs_stress_hh_assets:cs_emergency_hh_risk), 
             ~case_when(. == 4 ~ NA_real_,
