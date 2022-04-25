@@ -194,3 +194,43 @@ survey_long %>%
   expand_limits(x = 1.05) +
   facet_wrap(~priority) + 
   scale_y_reordered()
+
+survey_long %>%  
+  filter(str_detect(var, "shocks_|hoh_|rural|expense_food|not_improved|agri_activity|income_ms_|edu_") |
+           var %in% c("priority", "expense_food")) %>% 
+  lm_prep_long() %>% 
+  lm(priority ~ ., data = ., family = quasibinomial) %>% 
+  tidy(conf.int = TRUE) %>% 
+  filter(term != "(Intercept)") %>% 
+  mutate(term = str_replace(term, "income_ms", "income_source"),
+         term = str_replace(term, "hoh_age", ""),
+         term = str_replace(term, "hoh_education", ""), 
+         term = fct_reorder(term, estimate)) %>% 
+  ggplot(aes(x = estimate, y = term, colour = estimate)) + 
+  geom_vline(xintercept = 0, lty = 2, colour = "red") +
+  geom_point() + 
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2) +
+  scale_colour_viridis(option = "turbo") +
+  labs(x = "Estimate", y = "", 
+       title = "Predictive performance of environmental and demographic variables") +
+  theme(legend.position = "none", 
+        axis.text.y = element_text(size = 8.5),
+        axis.title.x = element_text(size = 8, face = "bold"), 
+        plot.title = element_text(size = 11))
+
+conflict_score %>% 
+  left_join(pcodes %>% 
+              select(admin1_pcode = SR_Pcode, admin3_pcode = Tsp_Pcode), by = "admin3_pcode") %>% 
+  group_by(admin1, admin1_pcode) %>% 
+  summarise(mean_score = mean(score_i), 
+            mean_fatalities = mean(fatalities)) %>%
+  left_join(survey %>% 
+              group_by(admin1_pcode) %>%  
+              summarise(respondents = n()), by = "admin1_pcode") %>% 
+  ungroup() %>% 
+  mutate(in_survey = !is.na(respondents),
+         in_survey = ifelse(respondents < 10 & !is.na(respondents), FALSE, in_survey),
+         admin1 = fct_reorder(admin1, mean_score)) %>%
+  ggplot(aes(x = mean_score, y = admin1, fill = in_survey)) + 
+  geom_col() +
+  labs(x = "Average conflict score", y = "")
