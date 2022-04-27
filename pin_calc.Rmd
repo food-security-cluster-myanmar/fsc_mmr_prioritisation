@@ -1,0 +1,111 @@
+---
+title: "Untitled"
+output: html_document
+date: '2022-04-26'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+summarise_pin <- function(tbl) {
+  tbl %>%  
+    summarise(weighted = sum(combined_wt)) %>% 
+    ungroup() %>% 
+    mutate(pc = weighted / sum(weighted),
+           pop = pc * 53431391)
+  # this is the 2021 population projection
+}
+
+survey %>% 
+  group_by(fcs_borderline_poor) %>% 
+  summarise_pin()
+
+survey %>% 
+  group_by(lhcsi_max_ag) %>% 
+  summarise_pin()
+
+survey %>% 
+  group_by(fies_raw) %>% 
+  summarise_pin()
+
+survey %>% 
+  group_by(priority) %>% 
+  summarise_pin()
+
+survey %>% group_by(fcs_borderline_poor, lhcsi_max_ag) %>% 
+  summarise_pin()
+
+survey %>% filter(lhcsi_max_ag %in% c("Crisis", "Emergency") )
+
+```
+
+```{r}
+ols2 <- survey %>%
+  select(fcs_borderline_poor, hoh_female, rural, not_improved_sanitation, 
+         contains("edu_"), contains("shocks_"), contains("income_ms"), survey_id) %>% 
+  left_join(survey %>% select(survey_id, hoh_age) %>%
+              mutate(value = 1) %>%
+              pivot_wider(names_from = hoh_age, values_from = value, values_fill = 0) %>%
+              select(-`NA`), by = "survey_id") %>% 
+  select(-survey_id) %>%
+  #slice(-c( 69, 297,  660, 1186, 1222, 1256, 1354, 1362, 1720, 
+  #          1820, 1823, 1843, 1936, 1950, 1952, 2003, 2132, 2329, 2594)) %>% 
+  drop_na() %>% 
+  lm(fcs_borderline_poor ~ ., data = .)
+
+summary(ols2)
+
+tree7 <- survey %>%
+  select(fcs_borderline_poor, hoh_female, rural, not_improved_sanitation, 
+         contains("edu_"), contains("shocks_"), contains("income_ms"), survey_id) %>% 
+  left_join(survey %>% select(survey_id, hoh_age) %>%
+              mutate(value = 1) %>%
+              pivot_wider(names_from = hoh_age, values_from = value, values_fill = 0) %>%
+              select(-`NA`), by = "survey_id") %>% 
+  select(-survey_id) %>% 
+  rpart(fcs_borderline_poor ~., data = ., cp = 0.005)
+
+plotcp(tree7)
+
+rpart.plot::rpart.plot(tree7)
+```
+
+```{r}
+tree8 <- survey %>% 
+  mutate(priority_new = ifelse(fcs_borderline_poor == 1 & priority == 1, 1, 0)) %>% 
+  select(priority_new, hoh_female, rural, not_improved_sanitation, 
+         contains("edu_"), contains("shocks_"), contains("income_ms"), survey_id) %>% 
+  left_join(survey %>% select(survey_id, hoh_age) %>%
+              mutate(value = 1) %>%
+              pivot_wider(names_from = hoh_age, values_from = value, values_fill = 0) %>%
+              select(-`NA`), by = "survey_id") %>% 
+  select(-survey_id) %>% 
+  rpart(priority_new ~., data = ., cp = 0.004)
+
+plotcp(tree8)
+rpart.plot::rpart.plot(tree8)
+```
+
+```{r}
+patchwork_scatter <- function(df, column_var) {
+  
+  column_var <- enquo(column_var)
+  
+  df %>%
+    filter(income_per_capita > 0) %>%
+    ggplot(aes(x = !!column_var, y = income_per_capita, colour = priority)) +
+    geom_jitter(alpha = 0.8) + 
+    scale_y_continuous(labels = comma, trans = "log10", 
+                       breaks = c(0, 1000, 10000, 100000, 1000000, 10000000)) +
+    geom_smooth(method = "lm") + 
+    theme(legend.position = "none") 
+}
+
+survey %>% patchwork_scatter(fs_score2) + 
+  survey %>% patchwork_scatter(hhfcs_inv) + 
+  survey %>% patchwork_scatter(fies_raw_range) + 
+  survey %>% patchwork_scatter(csi_weighted)
+```
+
