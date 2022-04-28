@@ -540,7 +540,9 @@ The first section deals with the development of core beneficiary selection crite
 ## 1. Beneficiary Selection using FAO-WFP survey data
 
 
-A total of `r nrow(survey)` households were interviewed in the FAO-WFP Shocks, Agricultural Livelihoods and Food Security Survey in Ayeyarwady, Kachin, Kayah, Kayin, Mon, Rakhine, Shan and Yangon to monitor food security and livelihoods of persons in Myanmar. Some of the most key data collected were on the various food security indices -- the Food Consumption Score (FCS), the Food Insecurity Experience Scale (FIES) and the Livelihood Coping Strategies Index (CSI). Additionally, a composite of the three indices, the Food Security Score has also been calculated. Information was also collected on basic household demographics as well on income sources. Much more detail can be gleaned from the report itself -- this document focuses only on the aspects of the survey which can be used for prioritisation.
+A total of `r nrow(survey)` households were interviewed in the FAO-WFP Shocks, Agricultural Livelihoods and Food Security Survey in Ayeyarwady, Chin, Kachin, Kayah, Kayin, Mon, Rakhine, Shan and Yangon to monitor food security and livelihoods of persons in Myanmar. Some of the most key data collected were on the various food security indices -- the Food Consumption Score (FCS), the Food Insecurity Experience Scale (FIES) and the Livelihood Coping Strategies Index (CSI). Much more detail can be gleaned from the report itself -- this document focuses only on the aspects of the survey which can be used for prioritisation.
+
+A composite of the three indices, the Food Insecurity Score has also been calculated. Information was also collected on basic household demographics as well on income sources. The construction of this composite score is detailed in section 4.2. 
 
 <br><br>
 
@@ -550,7 +552,7 @@ The plot below ranks variables in order of their ability to predict the various 
 
 Variables that are more red are most likely to result in high food insecurity scores (that is, higher food insecurity) and variables that are more blue are more likely to result in lower food insecurity scores. The dotted red line down the middle at $x=0$ splits variables into whether the predict higher food insecurity (positive numbers) or lower food insecurity (negative numbers). 
 
-For all these plots, the scores of the food security indices have all been scaled between 0 and 1, with higher scores indicating greater food insecurity.
+For all these plots, the scores of the food security indices have all been scaled between 0 and 1, with higher scores indicating greater food insecurity. The coefficient estimates below show how much a positive response on these variables would increase or decrease the score on each of the indices. 
 
 <br>
 
@@ -624,13 +626,11 @@ survey_long %>%
 
 <br>
 
-The plots above ranks variables in order of their ability to predict the various food security composite indices. Variables that are more red are more likely to result in high food insecurity scores and variables that are more blue are more likely to results in lower food insecurity scores. 
-
-The variables that are the most important in predicting high food security scores are a household's exposure to conflict, whether or not they lost employment or work opportunities, whether or not they were engaged in casual non-agricultural labour and whether or not they reported no income in the three months prior to the survey. 
+The variables that tendo to contribute the most to high food insecurity scores are a household's exposure to conflict, whether or not they lost employment or work opportunities, whether or not they were engaged in casual non-agricultural labour and whether or not they reported no income in the three months prior to the survey. 
 
 These variables can be thought of as a preliminary list of beneficiary selection criteria for food security and livelihoods programming. This list is, of course, non-exhaustive as it only includes variables that were included in the FAO-WFP survey. 
 
-The variables that were the best predictors of low food insecurity were whether or not the head of household had completed higher education and whether or not the main income source of the household was stable non-agricultural employment.
+The variables that were the best predictors of low food insecurity were whether or not the head of household had completed higher education, whether or not the main income source of the household was stable non-agricultural employment. 
 
 <br><br>
 
@@ -638,13 +638,13 @@ The variables that were the best predictors of low food insecurity were whether 
 
 An important step is narrowing down the population to a priority group -- Food Security Cluster partners do not have the resources to target all persons.
 
->A household was considered to be a priority for intervention when they were above the 75th percentile in at least two out of the three food security indices (food consumption score, coping strategies index and food insecurity experience scale)
+>A household would be consideered  a priority for intervention when above the 75th percentile in at least two out of the three food security indices (food consumption score, coping strategies index and food insecurity experience scale)
 
-Approximately 34% of the total population falls into this priority group. The plot below shows the food security sub-indicators that are the most important in determining whether a household falls into the priority group or not. 
+Approximately 34% of the sampled population falls into this priority group. The plot below shows the food security sub-indicators that are the most important in determining whether a household falls into the priority group or not. 
 
 The plots below shows the differences between the average values of food security index components based on whether they are priority households or not. Variables in blue correspond to Coping Strategies Index indicators, those in red to the Food Insecurity Experience Scale. 
 
-Those in green correspond to the Food Consumption Score -- for these indicators, they have been rescaled so that a value of 1 shows that a household has not consumed that food group at all in the previous 7 days and a value of 0 shows that they have consumed that food group every day for the past 7 days. 
+Those in green correspond to the Food Consumption Score. For these indicators, they have been rescaled so that a value of 1 shows that a household has not consumed that food group at all in the previous 7 days and a value of 0 shows that they have consumed that food group every day for the past 7 days. 
 
 <br>
 
@@ -704,9 +704,9 @@ survey <- survey %>%
 ```
 
 
-However large the differences are between the food security statuses of those in the priority group and those outside of it, many of these indicators are not easily observable. It would be extremely challenging to conduct a large-scale comprehensive food security survey prior to beneficiary selection.  
+However large the differences are between the food security statuses of those in the priority group and those outside of it, many of these indicators are not easily observable. And it would not be feasible to conduct a large-scale food security survey to determine the food consumption score for all potential beneficiary households.   
 
-This necessitates the creation of simple tool to aid in prioritisation. A simple tree has been developed, considering only the variables in the FAO-WFP survey that are easily observable. The tree below takes into account only three variables -- whether or not a household is in a rural area, whether or not they have experienced violence, insecurity or conflict in the past three months and whether or not they have lost work or employment opportunities in the past three months. 
+This necessitates the creation of simple tool to aid in prioritisation. A decision tree has been developed, considering only the variables in the FAO-WFP survey that are easily observable. The tree below takes into account only three variables -- whether or not a household is in a rural area, whether or not they have experienced violence, insecurity or conflict in the past three months and whether or not they have lost work or employment opportunities in the past three months. 
 
 Within each blue square, the figure in **bold** show the **percentage of each group that are priority households** and the figures in *italics* show the *percentage of the overall population* in each node. 
 
@@ -718,7 +718,7 @@ Within each blue square, the figure in **bold** show the **percentage of each gr
 
 The percentage of priority households in rural areas is much higher than in urban ones (37.6% vs 26.1%). For rural areas, the indicator that best distinguishes priority households is whether or they have directly experienced violence, insecurity or conflict in the past three months. The factor that best distinguishes priority households in urban areas is whether or not they have lost work or employment opportunities in the past three months.  
 
-The performance of the decision tree is not exactly spectacular -- if a partner wanted to target an entire community, the threshold for blanket coverage would be around 75% or 80% being in the priority group. But the decision tree is very simple and understandable (the last section on technical notes explains why a linear regression model was not employed here). Additional beneficiary selection criteria will be necessary, but this decision tree does at least give some direction for geographic prioritisation, which is discussed in the next section. 
+The performance of the decision tree is not exactly spectacular -- if a partner wanted to target an entire community, the threshold for blanket coverage would be around 75% or 80% of households being in the priority group which none of the nodes achieve. But the decision tree is very simple and understandable (the last section on technical notes explains why a linear regression model was not employed here). Additional beneficiary selection criteria will be necessary, but this decision tree does at least give some direction at the community level once geographic prioritisation has been conducted (which is which is the topic of section 2). 
 
 As a note, these findings are consistent with IFPRI's survey on household welfare where rural households were found to be more asset-poor and less resilient than urban ones. However, much more work remains to be done on triangulating the FAO-WFP survey with the IFPRI one, which was much more comprehensive in scope and scale. 
 
@@ -726,9 +726,9 @@ As a note, these findings are consistent with IFPRI's survey on household welfar
 
 ### 1.4 Exceptions for targeting agricultural households
 
-64.7% of the total population is in the tree node *[6]* (the nodes are all numbered in the decision tree above) -- within this group are households who reside in rural areas but have not been affected by violence, conflict or insecurity. Given that this is a significant chunk of the population where, with reference to the plot below, 78% of the population is involved in agriculture, an exception can be made in this one instance, to support partners who want to target agricultural households who have not been affected by the conflict.  
+64.7% of the total population is in the tree node *[6]* (the nodes are all numbered in the decision tree above) -- within this group are households who reside in rural areas but have not been affected by violence, conflict or insecurity. Given that this is a significant chunk of the population where, with reference to the plot below, 78% of the population is involved in agriculture, an exception can be made in this one instance, to support partners who want to select beneficiaries within the large group of agricultural households who have not been affected by conflict.  
 
-It must still be mentioned that aid flow first to the households in node *[7]*, where the proportion of households in the priority group is highest. Only after the needs of this population are met should households in node *[6]* be targeted. 
+It must still be mentioned that aid must first flow to the households in node *[7]*, where the proportion of households in the priority group is highest. Only after the needs of this population are met should households in node *[6]* be targeted. 
 
 <br>
 
@@ -768,7 +768,7 @@ Any further conditions applied on the tree only result in extremely marginal gai
 
 <br>
 
-It is perhaps best to target priority households in these areas by establishing clear beneficiary selection criteria. The plot below shows the best predictors of food insecurity within the households in node *[6]*. 
+It is perhaps best to target priority households in these areas by establishing clear beneficiary selection criteria. The plot below shows the coefficient estimates of environmental and demographic variables on food insecurity within the households in node *[6]*. 
 
 The variables within the FAO-WFP survey most of use to partners targeting priority households in node *[6]* are whether or not a household has improved sanitation and the educational attainment of the head of the household. The most important shocks for this group were natural hazards and the loss of work or employment opportunities. These variables constitute several core criteria fo beneficiary selection for rural households that have not been affected by conflict.
 
@@ -853,7 +853,7 @@ survey %>%
 
 The food insecurity scores of all groups except one are higher when a household has experienced conflict. This by no means constitutes a scientific proof (another survey would have to be conducted), but it is possible to state with some confidence that exposure to conflict has a negative impact on food security. The small sample size likely results in widely diverging values in some cases; additionally the purpose of the FAO-WFP survey was not to understand conflict dynamics. 
 
-The plot below is further examination of the impact of conflict on food security. The estimates in the plot below show the impact of exposure to conflict on the various food security indices. The food security indices used were re-scaled between 0 and 1, with higher scores indicating greater food insecurity. 
+The plot below further examines of the impact of conflict on food security. The estimates in the plot below show the impact of exposure to conflict on the various food security indices. As was done above, the food security indices used were re-scaled between 0 and 1, with higher scores indicating greater food insecurity. 
 
 Notably, the effect of conflict was most pronounced in the Food Insecurity Experience Scores of rural households -- exposure to conflict in these households was linked with a 0.12 increase in score, which is substantial. All the effects were statistically significant with the exception of conflict on Food Consumption Scores in urban contexts (that point is marked by a triangle in the plot below to denote this). 
 
@@ -905,11 +905,11 @@ survey %>%
   geom_vline(xintercept = 0, lty = 2, colour = "red") + 
   geom_point(aes(pch = fct_rev(factor(significant))), size = 2) + 
   geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2) + 
-  scale_colour_viridis(option = "turbo") + 
-  theme(legend.position = "none") + 
+  scale_colour_viridis(option = "turbo", guide = "none") + 
   labs(x = "Estimate", y = "", 
        title = "Effect of conflict on food security indices", 
-       subtitle = "Split by rural/urban contexts") 
+       subtitle = "Split by rural/urban contexts",
+       pch = "Significant") 
   
 ```
 
@@ -995,7 +995,7 @@ conflict_score %>%
 
 As can be seem from the barplots in the previous section, the distribution of conflict events and fatalities is not even, being skewed to a few states/regions. This is also evident at township level. In the scatterplot below, the averages of the number of conflict events and the number of fatalities at the township level have been marked by the dotted red lines, dividing the plot into four quadrants. 
 
-A requisite for any prioritisation score or index develop should be target, first and foremost, the townships in the upper right quadrant of the plot, which have the heaviest concentrations of conflict events and fatalities. These areas are where, as we have established in the section on beneficiary selection, where the highest concentrations of households in the priority group will be found. For reference, 58 townships have both above-average numbers of conflict events and fatalities (upper-right quadrant) and 196 townships have both below-average numbers of conflict events and fatalities (bottom-left quadrant). 
+A requisite for any prioritisation score or index develop should be to target, first and foremost, the townships in the upper right quadrant of the plot, which have the heaviest concentrations of conflict events and fatalities. These areas are where, as we have established in the section on beneficiary selection, where the highest concentrations of households in the priority group will be found. For reference, 58 townships have both above-average numbers of conflict events and fatalities (upper-right quadrant) and 196 townships have both below-average numbers of conflict events and fatalities (bottom-left quadrant). 
 
 <br>
 
@@ -1038,11 +1038,11 @@ ggplotly(conflict_scatter, tooltip = c("text")) %>%
 
 <br>
 
-At its most basic, the conflict score is just the average of battles, explosions, remote violence, violence against civilians, strategic developments, non-peaceful protests and riots and conflict-related fatalities. More details can be found in the FSC;s report [Understanding Conflict Dynamics in Myanmar through Conflict and Incident Data: A Food Security Perspective](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/). This score will be now be used as a shorthand for conflict incidence in Myanmar.
+At its most basic, the conflict score is just the average of battles, explosions, remote violence, violence against civilians, strategic developments, non-peaceful protests and riots, conflict-related fatalities and IDPs. More details can be found in the FSC;s report [Understanding Conflict Dynamics in Myanmar through Conflict and Incident Data: A Food Security Perspective](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/). This score will be now be used as a shorthand for conflict incidence in Myanmar.
 
-It is additionally recognised that different types of townships necessitate different programming options. And, as established in the first section, rural and urban areas have widely differing numbers of households in the priority group. Therefore, townships hace also split into four simple groups (A1, A2, B1 and B2) based on their conflict score and population density. 
+It is additionally recognised that different types of townships necessitate different programming options. And, as established in the first section, rural and urban areas have widely differing numbers of households in the priority group. Therefore, townships have also been split into four simple groups (A1, A2, B1 and B2) based on their conflict score and population density. 
 
-This grouping separates all 330 townships along two criteria -- high (A) or low (B) conflict score and high (1) or low (2) population density. Groups A1 and A2 have above average conflict scores. These 107 townships should be prioritised for humanitarian interventions. Recalling the scatterplot above, the colours have now been updated to reflect the prioritisation group. From the plot below that whilst group A1 have populations that are easier to access (having higher population density), the incidence of conflict is higher overall in group A2, with the numbers of conflict-related fatalities being much higher. This quick-and-dirty prioritisation has managed to exclude almost all the townships in bottom-left quadrant (least conflict-affected) from groups A1 and A2. 
+This grouping separates all 330 townships along two criteria -- **high (A) or low (B) conflict score and high (1) or low (2) population density**. Groups A1 and A2 have above average conflict scores. These 107 townships should be prioritised for humanitarian interventions. Recalling the scatterplot above, the colours have now been updated to reflect the prioritisation group. From the plot below that whilst group A1 have populations that are easier to access (having higher population density), the incidence of conflict is higher overall in group A2, with the numbers of conflict-related fatalities being much higher. This quick-and-dirty prioritisation has managed to exclude almost all the townships in bottom-left quadrant (least conflict-affected) from groups A1 and A2. 
 
 <br>
 
@@ -1155,7 +1155,7 @@ fs_pin %>%
 
 ### 2.3 Linking geographic prioritisation and beneficiary selection 
 
-Using the classifications from the simple decision tree in section 1.3, we can see that in rural areas, the highest proportions of people who are in the priority group are those who have been affected by conflict, followed by those who were affected by conflict and have lost work or employment opportunities. Rural areas severely-affected by conflict (the townships in group A2) are the areas in which we may reach populations with the highest proportions of households in the priority group.
+Using the classifications from the decision tree in section 1.3, we can see that in rural areas, the highest proportions of people who are in the priority group are those who have been affected by conflict, followed by those who were affected by conflict and have lost work or employment opportunities. Rural areas severely-affected by conflict (the townships in group A2) are the areas in which we may reach populations with the highest proportions of households in the priority group.
 
 <br>
 
@@ -1183,6 +1183,8 @@ survey %>%
 <br> 
 
 In urban areas, however, conflict incidence is not as important of a determining factor -- the best results can be achieved by targeting people who have lost work or employment opportunities, irrespective of whether or not they have been affected by conflict.  
+
+The table below shows the characteristics of the population groups that have the lowest concentrations of priority households.  
 
 <br>
 
@@ -1283,7 +1285,7 @@ fs_pin %>%
 
 In light of the impending monsoon season, the probability that a township will be affected by a major flood or cylconic event has been calculated. Major floods since 2008 have been factored into this calculation. 
 
-For the moment, conflict incidence and flood and cyclone risk will be evaluated separately. Flood and storm surge risk exist as probabilities for the moment and are intended to support prepositioning and Disaster Risk Reduction; this might change were severe flooding to occur in 2022. 
+For the moment, conflict incidence and flood and cyclone risk will be evaluated separately. Flood and storm surge risk exist as probabilities for the moment and are intended to support prepositioning and Disaster Risk Reduction. This might change were severe flooding to occur in 2022. 
 
 <br>
 
@@ -1400,11 +1402,11 @@ This paper serves a proposal on how vulnerable households (such as those in the 
 
 <br><br>
 
-### 4.2 Calculation of the food insecurity score
+### 4.2 Food insecurity score
 
-Food insecurity here is not recognised solely as a food secure/food insecure dichotomy and is instead treated as a matter of degree determined by an household's position the overall distribution of food security indicators. According to Betti and  Verma, "by appropriately weighting non-monetary indicators of deprivation to reflect their dispersion and correlation, it is possible to construct quantitative indices of deprivation in its various dimensions". At its most basic, the food insecurity score is a weighted average of its component indicators that rewards variables that are responsible for more of the variation in the dataset. 
+Food insecurity here is not recognised solely as a food secure/food insecure dichotomy and is instead treated as a matter of degree determined by an household's position the overall distribution of food security indicators. According to Betti and  Verma, "by appropriately weighting non-monetary indicators of deprivation to reflect their dispersion and correlation, it is possible to construct quantitative indices of deprivation in its various dimensions". At its most basic, the food insecurity score is a weighted sum of its component indicators that rewards variables that are responsible for more of the variation in the dataset. 
 
-To calculate the food insecurity score, variables within the Livelihood Coping Strategies Index, Food Consumption Score and Food Insecurity Experience scale were rescaled to values between $0$ and $1$. For most of the variables, $1$ meant "yes" and $0$ meant "no"; however, for the Food Consumption Score indicators, $0$ meant that a household had consumed that food group every day for the past 7 days and $1$ meant that a household had not consumed that food group for any of the prior 7 days. Additionally, coping strategies indicators at the "crisis" level were coded as $0.5$ for "yes" and indicators at the "emergency" level were coded as $1$ for "yes". This is to replace the typical severity weighting that would normally have occurred but was not part of the FAO-WFP survey process. 
+To calculate the Food Insecurity Score, variables within the Livelihood Coping Strategies Index, Food Consumption Score and Food Insecurity Experience scale were rescaled to values between $0$ and $1$. For most of the variables, $1$ meant "yes" and $0$ meant "no"; however, for the Food Consumption Score indicators, $0$ meant that a household had consumed that food group every day for the past 7 days and $1$ meant that a household had not consumed that food group for any of the prior 7 days. Additionally, coping strategies indicators at the "crisis" level were coded as $0.5$ for "yes" and indicators at the "emergency" level were coded as $1$ for "yes". This is to replace the typical severity weighting that would normally have occurred but was not part of the FAO-WFP survey process. 
 
 These calculations have been encoded in the R package **`mdepriv`** by Attilio and Aldo Benini, building on work done by Alperin and Van Kerm on their **`mdepriv`** Stata package. According to Alperin and Van Kerm, "**`mdepriv`** creates synthetic scores of deprivation that are linear functions of uni-dimensional deprivation items measured on the [0, 1] scale. With $x_{ij}$ denoting the value of a particular deprivation items $j$ for observation $i$. The synthetic scores calculated by **`mdepriv`** are weighted sums of the $M$ deprivation items: 
 
@@ -1441,6 +1443,7 @@ food_insecurity_score <- survey %>%
           output = "all", method = "cz")
 
 ```
+
 
 <br><br>
 
@@ -1501,6 +1504,19 @@ ols %>%
 
 ```
 
+<br> 
+
+As a  point of reference, below is the code for the decision tree. 
+
+```{r echo = TRUE}
+decision_tree <- survey %>% 
+  rpart(priority ~  shocks_lostwork + shocks_sicknessdeath + shocks_foodprices + 
+          shocks_conflict + shocks_cantworkbusiness + shocks_naturalhazard + 
+          shocks_accessmarket + shocks_pricesother + shocks_other + 
+          hoh_female + rural + not_improved_sanitation,
+        data = .,  weights = combined_wt , cp = 0.01)
+```
+
 <br><br>
 
 ### 4.4 Pairwise correlations of indicators in the FAO-WFP survey
@@ -1509,7 +1525,7 @@ The table below shows the top 20 correlations between the different variables co
 
 The vast majority of the variables, with the exception of composite scores and indices, are binary, with 1 being true and 0 being false. In these cases, a correlation of 1 would mean that a variable is true for all the households in which its match is also true; a correlation of 0.5 means that a variable is true for 50% of the households in which its match is true. 
 
-For instance, whether or not the head of the household has competed education (*edu_higher*) is most correlated with households whose main income source is stable non-agricultural income (*income_ms_stable_non_ag*). Similarly, a correlation of 0.175 between *rural* and *edu_none* indicates that in 17.5% of all rural households, the head of household has no formal educational attainment. It also should be noted that the components of each of the food security indices are most correlated with each other. 
+For instance, whether or not the head of the household has competed education (*edu_higher*) is most correlated with households whose main income source is stable non-agricultural income (*income_ms_stable_non_ag*). Similarly, a correlation of 0.175 between *rural* and *edu_none* indicates that in 17.5% of all rural households, the head of household has no formal educational attainment. It also should be noted that, as expected, the components of each of the food security indices are most correlated with each other. 
 
 <br>
 
