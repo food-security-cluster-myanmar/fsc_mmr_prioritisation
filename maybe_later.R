@@ -234,3 +234,20 @@ conflict_score %>%
   ggplot(aes(x = mean_score, y = admin1, fill = in_survey)) + 
   geom_col() +
   labs(x = "Average conflict score", y = "")
+
+survey %>% 
+  filter(income_ms_stable_non_ag == 1 & rural == 0) %>%
+  conf_impact() %>% 
+  mutate(category = "urban_workers") %>% 
+  rbind(
+    survey %>% 
+      filter(income_ms_agriculture == 1 & rural == 1) %>% 
+      conf_impact() %>% 
+      mutate(category = "rural_farmers")
+  ) %>% 
+  pivot_wider(names_from = shocks_conflict, values_from = mean_score, names_prefix = "conflict_") %>% 
+  mutate(diff = round((conflict_yes - conflict_no) / conflict_no * 100, digits = 2)) %>% 
+  arrange(desc(diff)) %>% 
+  select(category, hoh_education, `%_difference` = diff) %>%
+  kable(caption = "Percentage difference in food security scores") %>% 
+  kable_classic_2("striped", full_width = FALSE, position = "left")

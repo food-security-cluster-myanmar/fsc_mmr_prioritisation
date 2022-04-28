@@ -226,6 +226,8 @@ fs_pin <- pin %>%
                            conflict_score < mean(conflict_score) & population_density >= 1000 ~ "B1",
                            conflict_score < mean(conflict_score) & population_density < 1000 ~ "B2")) 
 
+# fs_pin %>% write_csv("fs_pin.csv")
+
 # should i just read in the whole survey dataset here? or just read in the csv
 # i don't really know if people are interested in the cleaning process
 
@@ -480,8 +482,8 @@ survey <- survey %>%
   mutate(priority = case_when(hhfcs_inv >= quantile(hhfcs_inv, probs = 0.75) & 
                                  fies_raw_range >= quantile(fies_raw_range, probs = 0.75) ~ 1, 
                                hhfcs_inv >= quantile(hhfcs_inv, probs = 0.75) & 
-                                 csi_weighted >= quantile(csi_weighted, probs = 0.75) ~ 1, 
-                               fies_raw_range >= quantile(fies_raw_range, probs = 0.75) & 
+                                 csi_weighted >= quantile(csi_weighted, probs = 0.75) ~ 1,
+                              fies_raw_range >= quantile(fies_raw_range, probs = 0.75) & 
                                  csi_weighted >= quantile(csi_weighted, probs = 0.75) ~ 1, 
                                TRUE ~ 0)) %>% 
   mutate(priority5 = case_when(hhfcs_inv >= quantile(hhfcs_inv, probs = 0.75) ~ 1, 
@@ -508,6 +510,9 @@ survey_long <- survey %>%
   rbind(survey %>% select(contains("shocks_"), survey_id) %>%
           pivot_longer(cols = -survey_id, names_to = "var", values_to = "value"))
 
+# 2022 Q1 5Ws
+
+fsc <- read_csv("fsc_q1_2022.csv")
 
 # show_col(viridis_pal(option = "cividis")(10))
 ```
@@ -1009,7 +1014,7 @@ conflict_scatter <- conflict_score %>%
                            state, ",", "\n",
                            "events: ", total_events, ",", "\n",
                            "fatalities: ", fatalities, ",", "\n",
-                           "partners: ", partners_2021))) +
+                           "partners_2021: ", partners_2021))) +
   geom_point(aes(size = fatalities), alpha = 0.85) +
   scale_y_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300, 1000)) +
   scale_x_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300)) +
@@ -1057,7 +1062,7 @@ scatter_groups <- fs_pin %>%
                            "group: ", group, ",", "\n",
                            "events: ", total_events, ",", "\n",
                            "fatalities: ", fatalities, ",", "\n",
-                           "partners: ", partners_2021))) +
+                           "partners_2021: ", partners_2021))) +
   geom_point(aes(size = fatalities), alpha = 0.8) +
   scale_y_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300, 1000)) +
   scale_x_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300)) +
@@ -1100,7 +1105,7 @@ pop_scatter <- fs_pin %>%
                            "group: ", group, ",", "\n",
                            "events: ", total_events, ",", "\n",
                            "fatalities: ", fatalities, ",", "\n",
-                           "partners: ", partners_2021))) +
+                           "partners_2021: ", partners_2021))) +
   geom_point(aes(size = conflict_score), alpha = 0.8) +
   scale_colour_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
   # scale_colour_viridis_d(option = "cividis") +
@@ -1214,7 +1219,98 @@ As mentioned earlier, rural households were found to be less resilient and more 
 
 <br><br>
 
-### 2.4 Maps of conflict scores and prioritisation group
+### 2.4 5W results from the first quarter of 2022
+
+In the first quarter of 2022, Food Security Cluster partners have reached a total of `r sum(fsc$new_beneficiaries) %>% format(big.mark = ",")` persons or `r round(sum(fsc$new_beneficiaries) / sum(fs_pin$fs_targeted) * 100, digits = 2)`% of the 2022 target. Below is an examination of the extent to which partners have targeted the townships most affected by conflict. 
+
+In this first plot, the number of beneficiaries reached in the first quarter of 2022 are plotted against the targeted population. Each point is a township and the red line down the middle represents reaching 100% of the target. How far above or below a township is indicates how far above or below the target it is. Additionally, the township priortisation group each township belongs to is marked by the colour. 
+
+The townships on the far left of the plot have beneficiaries despite not having targets for 2022 (their targets have been nominally coded as $1$ so they appear on the plot). 
+
+<br>
+
+```{r plotly-tsp-reached-groups}
+ben_target <- fsc %>% 
+  group_by(admin3_pcode_old) %>% 
+  summarise(beneficiaries = sum(new_beneficiaries),
+            partners = n_distinct(org_code)) %>% 
+  right_join(fs_pin, by = c("admin3_pcode_old" = "admin3_pcode")) %>% 
+  replace_na(list(beneficiaries = 0)) %>% 
+  mutate(reached_pc = beneficiaries / fs_targeted,
+         reached_pc = ifelse(is.infinite(reached_pc), 1, reached_pc),
+         fs_targeted = ifelse(fs_targeted == 0 & beneficiaries > 0, 1, fs_targeted),
+         fs_targeted = round(fs_targeted, digits = 0)) %>% 
+  arrange(desc(reached_pc)) %>% 
+  select(state, township, fs_pin, fs_targeted, beneficiaries, reached_pc, partners, group) %>%
+  ggplot(aes(x = fs_targeted, y = beneficiaries, colour = group, 
+             text = paste0(township, ",", "\n",
+                           state, ",", "\n",
+                           "beneficiaries_2022: ", beneficiaries, "\n",
+                           "target_2022: ", fs_targeted, "\n",
+                           "partners_2022: ", partners, "\n",
+                           "group: ", group))) + 
+  geom_abline(intercept = 0, slope = 1, lty = 2, colour = "red") + 
+  geom_point(aes(size = beneficiaries), alpha = 0.8) +
+  scale_size_continuous(guide = "none") + 
+  scale_x_continuous(trans = "log10", labels = comma) + 
+  scale_y_continuous(trans = "log10", labels = comma) +
+  scale_colour_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
+  labs(y = "Beneficiaries", x = "Targeted population", 
+       title = "Targeted population per township vs beneficiaries reached in Q1 2022, by prioritisation group",
+       subtitle = "The red line is 100% of target")
+
+ggplotly(ben_target, tooltip = c("text")) %>% 
+  config(displayModeBar = FALSE) %>% 
+  layout(title = list(text = 
+                        paste0("Targeted population per township vs beneficiaries reached in Q1 2022",
+                                    "<br>",
+                                    "<sup>",
+                                    "By prioritisation group; the red line is 100% of target","</sup>")))
+```
+
+<br>
+
+With reference to the table below, 71% of beneficiaries in Q1 2022 came from group A1 and 12% came from group A2. Whilst on the surface, this seems like partners have made an effort to reached conflict-affected townships, this has largely been due to oversubscription in 3 townships from Yangon and in Sittwe. The number of beneficiaries reached in these areas are more than 250% of their collective target. Without reaching 17 out of the 22 townships in group A1, the number of beneficiaries already exceeds the total or the entire group. 
+
+Whilst a broader range of townships in group A2 (high conflict score, low population density; where the highest concentrations of households in the priority group can be found) has been reached, the number of persons reached per townships remains far below what has been allocated to group A1. It is hoped that partners will be able to afford group A2 much higher coverage as the year progresses. 
+
+```{r table-reached-group}
+fsc %>% 
+  group_by(admin3_pcode_old) %>% 
+  summarise(beneficiaries = sum(new_beneficiaries),
+            partners = n_distinct(org_code)) %>% 
+  right_join(fs_pin, by = c("admin3_pcode_old" = "admin3_pcode")) %>% 
+  replace_na(list(beneficiaries = 0)) %>% 
+  mutate(reached_pc = beneficiaries / fs_targeted,
+         reached_pc = ifelse(is.infinite(reached_pc), 1, reached_pc),
+         fs_targeted = ifelse(fs_targeted == 0 & beneficiaries > 0, 1, fs_targeted),
+         fs_targeted = round(fs_targeted, digits = 0)) %>% 
+  arrange(desc(reached_pc)) %>% 
+  mutate(has_beneficaries = ifelse(beneficiaries > 0, 1, 0)) %>% 
+  group_by(group) %>% 
+  summarise(beneficiaries = sum(beneficiaries),
+            fs_targeted = sum(fs_targeted), 
+            townships = sum(has_beneficaries),
+            tsp_total = n()) %>% 
+  mutate(pc_reached = round(beneficiaries / fs_targeted * 100, digits = 2), 
+         pc_beneficiaries = round(beneficiaries / sum(beneficiaries) * 100, digits = 2),
+         pc_target = round(fs_targeted / sum(fs_targeted) * 100, digits = 2),
+         pc_tsp = round(townships / tsp_total * 100, digits = 2)) %>% 
+  select(group, beneficiaries, `%_beneficiaries` = pc_beneficiaries, 
+         tsp_reached = townships, tsp_total,
+         target = fs_targeted, `%_reached` = pc_reached) %>% 
+  kable(caption = "2022 Q1 beneficiaries and percent reached by prioritisation group", 
+        format.args = list(big.mark = ",")) %>% 
+  kable_classic_2("striped")
+```
+
+<br>
+
+Overall, the results from the first quarter of 2022 paint a mixed picture, with many townships in group A2 being reached but the population that has been reached still being skewed towards relatively few areas. Notably, only 3,450 beneficiaries have been reached in the whole of Sagaing, where the fighting has been heaviest. Furthermore, more beneficiaries were reached in group B2 (low conflict scores and low population density) than in group A2. It is recommended that targets and plans for the Food Security Cluster be reviewed, and partners be reminded to reallocate resources away from oversubscribed areas.
+
+<br><br>
+
+### 2.5 Maps of conflict scores and prioritisation group
 
 ```{r map-conflict-score, fig.height=9}
 
@@ -1252,7 +1348,7 @@ fs_pin %>%
 
 <br><br>
 
-### 2.5 Reference table for conflict variables
+### 2.6 Reference table for conflict variables
 
 Below is an interactive reference table for the various types of conflict events by township. It also includes the overall conflict score and prioritisation groups. The search bar can be used to find specific townships, or any of the columns may be sorted according to ascending or descending values. The table currently shows townships in descending order of conflict score. 
 
@@ -1508,7 +1604,7 @@ ols %>%
 
 As a  point of reference, below is the code for the decision tree. 
 
-```{r echo = TRUE}
+```{r eval = FALSE, echo = TRUE}
 decision_tree <- survey %>% 
   rpart(priority ~  shocks_lostwork + shocks_sicknessdeath + shocks_foodprices + 
           shocks_conflict + shocks_cantworkbusiness + shocks_naturalhazard + 
