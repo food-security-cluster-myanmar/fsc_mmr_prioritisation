@@ -1223,7 +1223,7 @@ As mentioned earlier, rural households were found to be less resilient and more 
 
 In the first quarter of 2022, Food Security Cluster partners have reached a total of `r sum(fsc$new_beneficiaries) %>% format(big.mark = ",")` persons or `r round(sum(fsc$new_beneficiaries) / sum(fs_pin$fs_targeted) * 100, digits = 2)`% of the 2022 target. Below is an examination of the extent to which partners have targeted the townships most affected by conflict. 
 
-In this first plot, the number of beneficiaries reached in the first quarter of 2022 are plotted against the targeted population. Each point is a township and the red line down the middle represents reaching 100% of the target. How far above or below a township is indicates how far above or below the target it is. Additionally, the township priortisation group each township belongs to is marked by the colour. 
+In this first plot, the number of beneficiaries reached in the first quarter of 2022 are plotted against the targeted population. Each point is a township and the red line down the middle represents reaching 100% of the target. How far above or below a township is indicates how far above or below the target it is. Additionally, the township prioritisation group each township belongs to is marked by the colour. 
 
 The townships on the far left of the plot have beneficiaries despite not having targets for 2022 (their targets have been nominally coded as $1$ so they appear on the plot). 
 
@@ -1280,28 +1280,26 @@ fsc %>%
   summarise(beneficiaries = sum(new_beneficiaries),
             partners = n_distinct(org_code)) %>% 
   right_join(fs_pin, by = c("admin3_pcode_old" = "admin3_pcode")) %>% 
-  replace_na(list(beneficiaries = 0)) %>% 
-  mutate(reached_pc = beneficiaries / fs_targeted,
-         reached_pc = ifelse(is.infinite(reached_pc), 1, reached_pc),
+  replace_na(list(beneficiaries = 0)) %>%
+  mutate(gap = ifelse(fs_targeted - beneficiaries <= 0, 0, fs_targeted - beneficiaries),
+         reached_pc = 1 - gap / fs_targeted, 
          fs_targeted = ifelse(fs_targeted == 0 & beneficiaries > 0, 1, fs_targeted),
-         fs_targeted = round(fs_targeted, digits = 0)) %>% 
-  arrange(desc(reached_pc)) %>% 
-  mutate(has_beneficaries = ifelse(beneficiaries > 0, 1, 0)) %>% 
+         has_beneficiaries = ifelse(beneficiaries > 0, 1, 0)) %>% 
   group_by(group) %>% 
-  summarise(beneficiaries = sum(beneficiaries),
-            fs_targeted = sum(fs_targeted), 
-            townships = sum(has_beneficaries),
+  summarise(beneficiaries = sum(beneficiaries, na.rm = TRUE), 
+            fs_targeted = sum(fs_targeted, na.rm = TRUE), 
+            gap = sum(gap, na.rm = TRUE), 
+            tsp_reached = sum(has_beneficiaries), 
             tsp_total = n()) %>% 
-  mutate(pc_reached = round(beneficiaries / fs_targeted * 100, digits = 2), 
-         pc_beneficiaries = round(beneficiaries / sum(beneficiaries) * 100, digits = 2),
-         pc_target = round(fs_targeted / sum(fs_targeted) * 100, digits = 2),
-         pc_tsp = round(townships / tsp_total * 100, digits = 2)) %>% 
-  select(group, beneficiaries, `%_beneficiaries` = pc_beneficiaries, 
-         tsp_reached = townships, tsp_total,
-         target = fs_targeted, `%_reached` = pc_reached) %>% 
+  mutate(pc_gap = round(gap / fs_targeted * 100, digits = 2)) %>% 
+  mutate_at(vars(fs_targeted, gap), ~ round(.)) %>% 
+  select(group, beneficiaries, target = fs_targeted, gap, `%_gap` = pc_gap, tsp_reached, tsp_total) %>% 
   kable(caption = "2022 Q1 beneficiaries and percent reached by prioritisation group", 
         format.args = list(big.mark = ",")) %>% 
-  kable_classic_2("striped")
+  kable_classic_2("striped") %>% 
+  footnote("Any reach above 100% is counted as 100%;\n exceeding the target in one township does not affect other townships", 
+           general_title = "")
+
 ```
 
 <br>
