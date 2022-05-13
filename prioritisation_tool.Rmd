@@ -206,7 +206,7 @@ fs_pin <- pin %>%
               filter(unique_beneficiaries == "Yes") %>%
               group_by(admin3_pcode) %>%
               summarise(beneficiaries_2021 = sum(beneficiaries),
-                        partners_2021 = n_distinct(implementing_partners)),
+                        partners_2021 = n_distinct(org_code)),
             by = "admin3_pcode") %>% 
   left_join(fsc %>% filter(date > "2021-09-01") %>%
               group_by(admin3_pcode) %>%
@@ -1646,9 +1646,61 @@ survey_long %>%
 
 The conflict score here originally appeared in the Food Security Cluster's report [Understanding Conflict Dynamics in Myanmar through Conflict and Incident Data: A Food Security Perspective](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/). It was calculated using ACLED data and yields a score for each township. 
 
-The conflict score is an update of the conflict index in the [MIMU-HARP Vulnerability Analysis](http://themimu.info/vulnerability-in-myanmar), using 2021 data. The specific conflict variables that included in the score were battles, explosions and remote violence, non-peaceful protests and riots, conflict-related fatalities, strategic developments and number of IDPs. 
+The conflict score is an update of the conflict index in the [MIMU-HARP Vulnerability Analysis](http://themimu.info/vulnerability-in-myanmar), using 2021 data. The specific conflict variables that included in the score were battles, explosions and remote violence, non-peaceful protests and riots, conflict-related fatalities, strategic developments and number of IDPs. Only the version of the conflict score within this document takes IDPs into account; in the Food Security Cluster's earlier report on conflict (linked in the previous paragraph), the Cluster did not yet have access to detailed IDP data. 
 
-The conflict score is an average of the normalised values of key conflict indicators. Its main use it to aid decisions about geographic prioritisation. These normalised values have been re-weighted with Betti-Verma method, which penalises redundancy and rewards variation; this is the only notable divergence from the MIMU-HARP methodology. The Betti-Verma method was employed through the **`mdepriv`** package developed by Attilio and Aldo Benini. The specific formula used in the development of the score can found by downloading the code at the top-right corner of the page. 
+The conflict score is an average of the normalised values of key conflict indicators. Its main use it to aid decisions about geographic prioritisation. These normalised values have been re-weighted with Betti-Verma method, which penalises redundancy and rewards variation; this is the only notable divergence from the MIMU-HARP methodology. The Betti-Verma method was employed through the **`mdepriv`** package developed by Attilio and Aldo Benini.
 
-However, it must be noted that whilst the scores themselves can be shared and used, replicating all the calculations will necessitate obtaining permission from UNHCR as their township-level breakdown of IDP populations have not been shared publicly. The Food Security Cluster regrets this limitation and is actively advocating for increased data transparency and sharing between humanitarian actors. 
+Unlike the Food Insecurity Score, the component variables of the conflict index were not binary, meaning that it was possible to take advantage of the Betti-Verma method's double-weighting rule which is sensitive to both the relative frequency of the variables and the correlation amongst variables: 
+
+$$
+w_j \propto (w_j^a \cdot w_j^b)
+$$
+
+However, it must be noted that whilst the scores themselves can be shared and used, replicating all the calculations will necessitate obtaining permission from UNHCR as their township-level breakdown of IDP populations have not been shared publicly. The specific code for calculating the conflict score can be found below. 
+
+<br>
+
+```{r eval=FALSE, echo=TRUE}
+
+# Betti-Verma calculations and the construction of the conflict score
+index_shares2 <- conflict_df2 %>%   
+  mutate_at(vars(c(battles, explosions_remote_violence, violence_against_civilians, 
+                   fatalities, strategic_developments, 
+                   protests_and_riots, total_idps)), 
+           scale) %>%  
+  mutate_at(vars(c(battles, explosions_remote_violence, violence_against_civilians, 
+                   fatalities, strategic_developments, 
+                   protests_and_riots, total_idps)), 
+           funs((. - min(., na.rm = T))/(max(., na.rm = T) - min(., na.rm = T)))) %>% 
+  mdepriv(c("battles", "explosions_remote_violence", 
+            "violence_against_civilians", "fatalities", 
+            "strategic_developments", "protests_and_riots", "total_idps"),
+          method = "bv", output = "all")
+
+# this is the dataset that has been read into this report
+conflict_score2 <- conflict_df2 %>%
+  left_join(index_shares2$data %>% 
+              select(admin3_pcode, 
+                     score_i, # this is the conflict_score
+                     index_battles = battles, 
+                     index_explosions_remote_violence = explosions_remote_violence,
+                     index_violence_against_civilians = violence_against_civilians, 
+                     index_fatalities = fatalities, 
+                     index_strategic_developments = strategic_developments, 
+                     index_protests_and_riots = protests_and_riots), 
+            by = "admin3_pcode") %>% 
+  # IDP counts not selected for inclusion in this dataframe
+  left_join(acled %>% 
+              distinct(admin1, admin3, admin3_pcode), 
+            by = "admin3_pcode") %>% 
+  left_join(fsc %>%  
+              group_by(admin3_pcode) %>% 
+              summarise(partners = n_distinct(org_code),
+                        beneficiaries = 
+                          sum(beneficiaries[unique_beneficiaries == "Yes"])), 
+            by = "admin3_pcode") %>% 
+  left_join(conflict_score %>% select(old_conflict_score = score_i, admin3_pcode), 
+            by = "admin3_pcode")
+```
+
 
