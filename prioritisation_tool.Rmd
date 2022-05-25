@@ -555,7 +555,8 @@ The first section deals with the development of core beneficiary selection crite
 * Food Security Cluster, Myanmar (2021). 5Ws reporting tool.
 * Food Security Cluster, Myanmar (2022). Understanding Conflict Dynamics in Myanmar through Conflict and Incident Data: A Food Security Perspective. https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/.
 * HARP-F and MIMU (2018). Vulnerability in Myanmar: A Secondary Data Review of Needs, Coverage and Gaps. http://themimu.info/vulnerability-in-myanmar.
-* IFPRI (2022). Household Welfare in Myanmar: Results from the Myanmar Household Welfare Survey
+* IFPRI (2022). Household Welfare in Myanmar: Results from the Myanmar Household Welfare Survey. 
+* UNHCR (2022). Pre and Post 1 Feb 2021 IDPs Population by Township level. 
 
 <br><br><br>
 
@@ -1734,7 +1735,7 @@ $$
 w_j \propto (w_j^a \cdot w_j^b)
 $$
 
-However, it must be noted that whilst the scores themselves can be shared and used, replicating all the calculations will necessitate obtaining permission from [UNHCR](mailto:Nii Ako Sowa <sowanii@unhcr.org>) as their township-level breakdown of IDP populations have not been shared publicly. The specific code for calculating the conflict score can be found below. 
+However, it must be noted that whilst the scores themselves can be shared and used, replicating all the calculations will necessitate obtaining permission from [UNHCR](mailto:<Nii Ako Sowa>sowanii@unhcr.org?cc=myayaim@unhcr.org&subject=Myanmar%20IDP%20data) as their township-level breakdown of IDP populations have not been shared publicly. The specific code for calculating the conflict score can be found below. 
 
 <br>
 
