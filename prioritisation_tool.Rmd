@@ -425,7 +425,8 @@ survey <- fao_survey %>%
   mutate(agri_hhd = ifelse(income_ms_agriculture == 1 | income_ms_fisheries == 1 | income_ms_livestock == 1 |
                                       agri_activity == 1 | income_sec <= 10, 1, 0),
          agri_main = ifelse(income_ms_agriculture == 1 | income_ms_fisheries == 1 |
-                              income_ms_fisheries == 1 | agri_activity == 1, 1, 0)) 
+                              income_ms_fisheries == 1 | agri_activity == 1, 1, 0)) %>% 
+  rename(children_0_4 = hhsize04)
 
 # fs_score mdepriv
 fs_share <- survey %>%  
@@ -511,7 +512,8 @@ survey_long <- survey %>%
   select(survey_id, priority, fs_score, fs_score2, fs_score3, fs_score4, meb_pc, 
          contains("cs_"), contains("csi_"), contains("fies"), contains("fcs_"), contains("needs_"), 
          hhfcs_inv, need, 
-         hoh_female, rural, expense_food, not_improved_sanitation, income_main_comp, agri_activity,
+         hoh_female, children_0_4, hh_size, hhdisability, 
+         rural, expense_food, not_improved_sanitation, income_main_comp, agri_activity,
          lhcsi_max, lhcsi_range, accessmarket) %>% 
   select(-contains("wt"), -notefcs_, -lhcsi_max_ag) %>% 
   left_join(survey %>% select(survey_id, income_source, hoh_education, hoh_age, residence_type) %>% 
@@ -579,7 +581,7 @@ For all these plots, the scores of the food security indices have all been scale
 
 <br>
 
-```{r coefficient-plot-priority, fig.height=8}
+```{r coefficient-plot-priority, fig.height=8.5}
 lm_prep_long <- function(tbl) {
   tbl %>% 
     group_by(var) %>% 
@@ -613,7 +615,7 @@ plot_coef <- function(tbl) {
 }
 
 survey_long %>%  
-  filter(str_detect(var, "shocks_|hoh_|rural|expense_food|not_improved|agri_activity|income_ms_|edu_") |
+  filter(str_detect(var, "shocks_|hoh_|rural|expense_food|not_improved|agri_activity|income_ms_|edu_|size|children|disability") |
            var %in% c("fs_score4", "expense_food")) %>% 
   lm_prep_long() %>% 
   mutate(fs_score4 = log(fs_score4)) %>% 
@@ -623,7 +625,7 @@ survey_long %>%
   labs(title = "Food insecurity score") + 
   
 survey_long %>%
-        filter(str_detect(var, "shocks_|hoh_|rural|expense_food|not_improved|agri_activity|income_ms_|edu_") |
+        filter(str_detect(var, "shocks_|hoh_|rural|expense_food|not_improved|agri_activity|income_ms_|edu_|size|children|disability") |
          var %in% c("csi_weighted", "expense_food")) %>%
   lm_prep_long() %>%
   lm(csi_weighted ~ ., data = .) %>%
@@ -631,7 +633,7 @@ survey_long %>%
   labs(title = "Coping strategies index") + 
   
 survey_long %>%
-  filter(str_detect(var, "shocks_|hoh_|rural|expense_food|not_improved|agri_activity|income_ms_|edu_") |
+  filter(str_detect(var, "shocks_|hoh_|rural|expense_food|not_improved|agri_activity|income_ms_|edu_|size|children|disability") |
            var %in% c("hhfcs_inv", "expense_food")) %>%
   lm_prep_long() %>%
   lm(hhfcs_inv ~ ., data = .) %>%
@@ -639,7 +641,7 @@ survey_long %>%
   labs(title = "Food consumption score") + 
 
 survey_long %>%
-  filter(str_detect(var, "shocks_|hoh_|rural|expense_food|not_improved|agri_activity|income_ms_|edu_") |
+  filter(str_detect(var, "shocks_|hoh_|rural|expense_food|not_improved|agri_activity|income_ms_|edu_|size|children|disability") |
            var %in% c("fies_raw_range", "expense_food")) %>%
   lm_prep_long() %>%
   lm(fies_raw_range ~ ., data = .) %>%
@@ -703,6 +705,69 @@ survey %>% select(contains("fies"), contains("fcs_"), contains("cs_emergency"), 
 Whilst both groups tend to consume low amounts of dairy, pulses, sugar and fruits, these trends are much more pronounced in the priority group. Additionally, households in the priority group are more than twice as likely to have poor protein consumption, be worried about not having enough food and eat less due to a lack of resources. 
 
 Households in the priority group were also more than four times as likely to have reduced healthcare expenditures, have sold productive assets and be unable to eat healthy and nutritious foods and eat only a few kinds of foods. They are also more than five times as likely to skipped meals or gone hungry. 
+
+<br> 
+
+### Establishing a beneficiary profile
+
+```{r comparison-demographic-environmental}
+
+survey %>% 
+  select(matches("shocks_|hoh_female|rural|expense_food|not_improved|agri_activity|income_ms_|size|children|disability"), survey_id) %>% 
+  select(-shocks_none, -crp_landsize, -ruralurban) %>% 
+  left_join(survey %>% select(hoh_education, hoh_age, residence_type, survey_id) %>% 
+              pivot_longer(cols = -survey_id, names_to = "old_var", values_to = "var") %>%
+              mutate(value = 1) %>% 
+              select(-old_var) %>% 
+              pivot_wider(names_from = var, values_from = value, values_fill = 0), by = "survey_id") %>%  
+  pivot_longer(cols = -survey_id, names_to = "var", values_to = "value") %>% 
+  left_join(survey %>% select(survey_id, priority), by = "survey_id") %>% 
+  mutate(priority = recode(priority, `0` = "not_priority", `1` = "priority")) %>% 
+  group_by(priority, var) %>% 
+  summarise(mean = mean(value, na.rm = TRUE)) %>% 
+  filter(var != "NA") %>% 
+  pivot_wider(names_from = priority, values_from = mean, values_fill = 0) %>% 
+  mutate(diff_pc = round((priority - not_priority) / not_priority * 100, digits = 2)) %>% 
+  arrange(desc(diff_pc)) %>% 
+  left_join(
+    survey %>%
+      select(matches("shocks_|hoh_female|rural|expense_food|not_improved|agri_activity|income_ms_|size|children|disability"), survey_id) %>% 
+      select(-shocks_none, -crp_landsize) %>% 
+      left_join(survey %>% select(hoh_education, hoh_age, residence_type, survey_id) %>% 
+                  pivot_longer(cols = -survey_id, names_to = "old_var", values_to = "var") %>%
+                  mutate(value = 1) %>% 
+                  select(-old_var) %>% 
+                  pivot_wider(names_from = var, values_from = value, values_fill = 0), by = "survey_id") %>%  
+      pivot_longer(cols = -survey_id, names_to = "var", values_to = "value") %>% 
+      group_by(var) %>% 
+      summarise(sum = sum(value, na.rm = TRUE), 
+                count = n()) %>% 
+      mutate(proportion = round(sum / count * 100, digits = 2)) %>% 
+      select(-sum, -count) %>% 
+      filter(var != "NA"), by = "var"
+  ) %>% 
+  mutate(proportion = case_when(var == "children_0_4" ~ round(938 / 2708 * 100, digits = 2), 
+                                var == "hh_size" ~ 5.10, 
+                                TRUE ~ proportion),
+         priority = round(priority * 100, digits = 2), 
+         not_priority = round(not_priority * 100, digits = 2)) %>% 
+  rename(`%_sample` = proportion, `%_diff` = diff_pc, variable = var) %>% 
+  datatable(filter = list(position = "top", clear = FALSE),
+            options = list(pageLength = 15, scrollX = TRUE),
+            caption = htmltools::tags$caption(style = "caption-side: top;
+                                              text-align: center; font-size: 130%;",
+                                              "Components of the beneficiary profile")) %>% # rewrite this when you're not tired
+  formatStyle(0, target = "row", lineHeight = "80%", fontSize = "80%")
+  
+# i kinda hate having to do it this way, but i don't have time
+# survey %>% 
+#   mutate(has_children_0_4 = ifelse(children_0_4 > 0, 1, 0)) %>% 
+#   {sum(.$has_children_0_4)}
+# 
+# mean(survey$hh_size, na.rm = TRUE)
+  
+```
+
 
 <br><br>
 
@@ -1776,5 +1841,47 @@ conflict_score2 <- conflict_df2 %>%
             by = "admin3_pcode")
 ```
 
+# vulnerability score
 
+```{r}
+# i think this works our pretty well 
+vul_share <- vulmmr %>% select(avg_safe_sanitation_improved_drinking_water:female_literacy_percent_literate, 
+                  child_dependency_ratio_31, unpaid_family_worker_percent,
+                  admin3_pcode = township_pcode) %>% 
+  left_join(conflict_score %>% select(conflict_score = score_i, admin3_pcode), by = "admin3_pcode") %>% 
+  select(-conflict_index_c_percent_of_max_inverse_percent_of_average_of_envelopes_12, 
+         -unpaid_family_workers_inverse, -child_dependency_ratio_inverse) %>% 
+  mutate_at(vars(avg_safe_sanitation_improved_drinking_water:female_literacy_percent_literate), ~ 1 - .x) %>% 
+  filter(!is.na(admin3_pcode)) %>%  
+  replace(is.na(.), 0) %>% 
+  mdepriv(c("avg_safe_sanitation_improved_drinking_water", "average_good_roof_and_wall", 
+            "highest_education_at_least_middle_school_percent_14", "electricity_for_lighting_percent_15", 
+            "id_card_with_id_total_percent_16", "female_literacy_percent_literate", 
+            "child_dependency_ratio_31", "unpaid_family_worker_percent", "conflict_score"), 
+          method = "cz", output = "all", 
+          score_i_heading = "vul_score")
+  
+  
+glimpse(vul_share)
+vul_share$summary_by_item
+
+vulmmr %>% 
+  select(avg_safe_sanitation_improved_drinking_water:female_literacy_percent_literate,
+         child_dependency_ratio_31, unpaid_family_worker_percent,
+         admin3_pcode = township_pcode) %>% 
+  left_join(conflict_score %>% select(conflict_score = score_i, admin3_pcode), by = "admin3_pcode") %>% 
+  select(-conflict_index_c_percent_of_max_inverse_percent_of_average_of_envelopes_12, 
+         -unpaid_family_workers_inverse, -child_dependency_ratio_inverse) %>% 
+  relocate(admin3_pcode, .after = conflict_score) %>% 
+  filter(!is.na(admin3_pcode)) %>% 
+  mutate_at(vars(avg_safe_sanitation_improved_drinking_water:female_literacy_percent_literate), ~ 1 - .x) %>% 
+  replace(is.na(.), 0) %>% 
+  rowwise() %>% 
+  mutate(vul_score_flat = mean(c(avg_safe_sanitation_improved_drinking_water:conflict_score))) %>% 
+  left_join(vul_share$data %>% select(admin3_pcode, vul_score), by = "admin3_pcode") %>% 
+  ggplot(aes(x = vul_score_flat, y = vul_score)) + 
+  geom_point()
+  
+
+```
 
