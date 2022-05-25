@@ -49,7 +49,6 @@ library(janitor)
 library(scales)
 library(magrittr)
 library(sf)
-library(s2)
 library(bookdown)
 library(patchwork)
 library(kableExtra)
@@ -135,7 +134,7 @@ pcodes <- read_excel("Myanmar PCodes Release_9.3_Jan2021_(StRgn_Dist_Tsp_Town_Wa
          district = `District/SAZ_Name_Eng`)
 
 # shapefiles
-pcode3_shape <- st_read("C:/Users/seany/Downloads/R/acled/mmr_polbnda_adm3_mimu_250k/mmr_polbnda_adm3_mimu_250k.shp", 
+pcode3_shape <- st_read("./mmr_polbnda_adm3_mimu_250k/mmr_polbnda_adm3_mimu_250k.shp", 
                         quiet = TRUE) %>% 
  rename(state = ST, 
         admin1_pcode = ST_PCODE,
@@ -143,15 +142,15 @@ pcode3_shape <- st_read("C:/Users/seany/Downloads/R/acled/mmr_polbnda_adm3_mimu_
         admin3_pcode = TS_PCODE) %>% 
  mutate(admin3_pcode = ifelse(str_detect(township, "Hlaingtharya"), "MMR013008", admin3_pcode))
 
-pcode1_shape <- st_read("C:/Users/seany/Downloads/R/acled/mmr_polbnda2_adm1_mimu_250k/mmr_polbnda2_adm1_mimu_250k.shp", quiet = TRUE) %>% 
+pcode1_shape <- st_read("./mmr_polbnda2_adm1_mimu_250k/mmr_polbnda2_adm1_mimu_250k.shp", quiet = TRUE) %>% 
  rename(state = ST, 
         admin1_pcode = ST_PCODE) %>% st_as_sf()
 
 # reading in 5Ws
-fsc <- read_csv("C:/Users/seany/Downloads/R/acled/fsc5w_2021.csv")
+fsc <- read_csv("fsc5w_2021.csv")
 
 # reading in vulnerability dataset
-vulmmr <- read_excel("C:/Users/seany/Downloads/R/mmr_5w_initial_observations/Datasets_Vulnerability_Analysis_in_Myanmar_09Jul2018 (1).xlsx",
+vulmmr <- read_excel("Datasets_Vulnerability_Analysis_in_Myanmar_09Jul2018 (1).xlsx",
            skip = 1) %>% 
   slice(-c(1:3)) %>% 
   clean_names() %>% 
@@ -435,7 +434,7 @@ fs_share <- survey %>%
   mutate_at(vars(hhfcs_inv, fies_raw, csi_weighted), range_wna) %>% 
   mdepriv(c("hhfcs_inv", "fies_raw", "csi_weighted"), method = "bv", output ="all")
 
-# fs_scorce2 mdepriv
+# fs_score3 mdepriv
 fs_share2 <- survey %>% 
   mutate_at(vars(cs_crisis_sold_prod_assets, cs_crisis_no_school, cs_crisis_reduced_health_exp), ~ . * 0.5) %>% 
   select(survey_id, fcs_staple, fcs_pulse, fcs_dairy, fcs_protein, fcs_veg, fcs_fruit, fcs_fat, fcs_sugar, 
@@ -462,7 +461,19 @@ fs_share3 <- survey %>%
          "fies_fewfood", "fies_skipped", "fies_whlday", "fies_hungry", "fies_ateless", "fies_healthy",
          "fies_runout", "fies_worried"), output = "all", sampling_weights = "combined_wt")
 
-# priority scores
+fs_share4 <- survey %>% 
+  mutate_at(vars(cs_crisis_sold_prod_assets, cs_crisis_no_school, cs_crisis_reduced_health_exp), ~ . * 0.5) %>% 
+  select(survey_id, hhfcs_inv, 
+         cs_crisis_sold_prod_assets, cs_crisis_no_school, cs_crisis_reduced_health_exp, 
+         cs_emergency_sold_house, cs_emergency_hh_migration, cs_emergency_hh_risk,
+         fies_fewfood, fies_skipped, fies_whlday, fies_hungry, fies_ateless, fies_healthy,
+                 fies_runout, fies_worried, combined_wt) %>% 
+  mdepriv(c("hhfcs_inv", 
+         "cs_crisis_sold_prod_assets", "cs_crisis_no_school", "cs_crisis_reduced_health_exp", 
+         "cs_emergency_sold_house", "cs_emergency_hh_migration", "cs_emergency_hh_risk",
+         "fies_fewfood", "fies_skipped", "fies_whlday", "fies_hungry", "fies_ateless", "fies_healthy",
+         "fies_runout", "fies_worried"), output = "all", sampling_weights = "combined_wt")
+
 # priority scores
 survey <- survey %>%
   left_join(fs_share$data %>% 
@@ -471,6 +482,8 @@ survey <- survey %>%
               select(fs_score2 = score_i, survey_id), by = "survey_id") %>% 
   left_join(fs_share3$data %>% 
               select(fs_score3 = score_i, survey_id), by = "survey_id") %>% 
+  left_join(fs_share4$data %>%  
+              select(fs_score4 = score_i, survey_id), by = "survey_id") %>% 
    mutate(priority1 = case_when(hhfcs_inv >= mean(hhfcs_inv) & 
                                     fies_raw_range >= mean(fies_raw_range) & csi_weighted >= mean(csi_weighted) ~ 1,
                                TRUE ~ 0)) %>%
@@ -495,7 +508,7 @@ survey <- survey %>%
 # survey long
 
 survey_long <- survey %>%
-  select(survey_id, priority, fs_score, fs_score2, fs_score3, meb_pc, 
+  select(survey_id, priority, fs_score, fs_score2, fs_score3, fs_score4, meb_pc, 
          contains("cs_"), contains("csi_"), contains("fies"), contains("fcs_"), contains("needs_"), 
          hhfcs_inv, need, 
          hoh_female, rural, expense_food, not_improved_sanitation, income_main_comp, agri_activity,
@@ -511,8 +524,12 @@ survey_long <- survey %>%
           pivot_longer(cols = -survey_id, names_to = "var", values_to = "value"))
 
 # 2022 Q1 5Ws
-
 fsc <- read_csv("fsc_q1_2022.csv")
+
+# ACLED dataset
+acled <- read_csv("acled.csv") %>% 
+  mutate(has_village = if_else(location != admin3, "yes", "no"))
+
 
 # show_col(viridis_pal(option = "cividis")(10))
 ```
@@ -545,7 +562,7 @@ The first section deals with the development of core beneficiary selection crite
 ## 1. Beneficiary Selection using FAO-WFP survey data
 
 
-A total of `r nrow(survey)` households were interviewed in the FAO-WFP Shocks, Agricultural Livelihoods and Food Security Survey in Ayeyarwady, Chin, Kachin, Kayah, Kayin, Mon, Rakhine, Shan and Yangon to monitor food security and livelihoods of persons in Myanmar. Some of the most key data collected were on the various food security indices -- the Food Consumption Score (FCS), the Food Insecurity Experience Scale (FIES) and the Livelihood Coping Strategies Index (CSI). Much more detail can be gleaned from the report itself -- this document focuses only on the aspects of the survey which can be used for prioritisation.
+A total of `r nrow(survey) %>% format(big.mark = ",")` households were interviewed in the FAO-WFP Shocks, Agricultural Livelihoods and Food Security Survey in Ayeyarwady, Chin, Kachin, Kayah, Kayin, Mon, Rakhine, Shan and Yangon to monitor food security and livelihoods of persons in Myanmar. Some of the most key data collected were on the various food security indices -- the Food Consumption Score (FCS), the Food Insecurity Experience Scale (FIES) and the Livelihood Coping Strategies Index (CSI). Much more detail can be gleaned from the report itself -- this document focuses only on the aspects of the survey which can be used for prioritisation.
 
 A composite of the three indices, the Food Insecurity Score has also been calculated. Information was also collected on basic household demographics as well on income sources. The construction of this composite score is detailed in section 4.2. 
 
@@ -596,11 +613,11 @@ plot_coef <- function(tbl) {
 
 survey_long %>%  
   filter(str_detect(var, "shocks_|hoh_|rural|expense_food|not_improved|agri_activity|income_ms_|edu_") |
-           var %in% c("fs_score3", "expense_food")) %>% 
+           var %in% c("fs_score4", "expense_food")) %>% 
   lm_prep_long() %>% 
-  mutate(fs_score3 = log(fs_score3)) %>% 
-  mutate(fs_score3 = ifelse(is.infinite(fs_score3), 0, fs_score3)) %>% 
-  lm(fs_score3 ~ ., data = .) %>% 
+  mutate(fs_score4 = log(fs_score4)) %>% 
+  mutate(fs_score4 = ifelse(is.infinite(fs_score4), 0, fs_score4)) %>% 
+  lm(fs_score4 ~ ., data = .) %>% 
   plot_coef() + 
   labs(title = "Food insecurity score") + 
   
@@ -782,11 +799,11 @@ The variables within the FAO-WFP survey most of use to partners targeting priori
 ```{r coef-plot-node6}
 survey %>% filter(rule4 == 6) %>% 
   select(contains("shocks_"), not_improved_sanitation, contains("income_ms_"),
-         hoh_education, hoh_female, hoh_age, fs_score2) %>% 
+         hoh_education, hoh_female, hoh_age, fs_score4) %>% 
   select(-c(shocks_conflict, income_ms_fisheries)) %>% 
-  mutate(fs_score2 = log(fs_score2)) %>% 
-  mutate(fs_score2 = ifelse(is.infinite(fs_score2), 0, fs_score2)) %>% 
-  lm(fs_score2 ~ ., data = .) %>% 
+  mutate(fs_score4 = log(fs_score4)) %>% 
+  mutate(fs_score4 = ifelse(is.infinite(fs_score4), 0, fs_score4)) %>% 
+  lm(fs_score4 ~ ., data = .) %>% 
     tidy(conf.int = TRUE) %>%
     filter(term != "(Intercept)") %>% 
     mutate(term = str_replace(term, "income_ms", "income_source"),
@@ -823,7 +840,7 @@ conf_impact <- function(tbl) {
     group_by(hoh_education, shocks_conflict) %>% 
     filter(!is.na(hoh_education),
            hoh_education != "edu_religious") %>% 
-    summarise(mean_score = mean(fs_score2)) %>% 
+    summarise(mean_score = mean(fs_score4)) %>% 
     ungroup() %>% 
     mutate(shocks_conflict = recode(shocks_conflict, `0` = "no", `1` = "yes"),
            shocks_conflict = fct_rev(shocks_conflict),
@@ -844,7 +861,7 @@ survey %>%
   ggplot(aes(x = mean_score, y = hoh_education, fill = shocks_conflict)) + 
   geom_col(position = "dodge") +
   geom_text(aes(label = round(mean_score, 3)), 
-            size = 3.5, hjust = -0.1, 
+            size = 3.5, hjust = "inward", 
             position = position_dodge(width = 0.9)) +
   labs(x = "Mean food insecurity score", y = "Education level, household head",
        fill = "shock:\nconflict",
@@ -852,6 +869,7 @@ survey %>%
        subtitle = "Higher scores indicate higher food insecurity") +
   expand_limits(x = 0.16) +
   facet_wrap(~ category)
+
 ```
 
 <br>
@@ -860,7 +878,7 @@ The food insecurity scores of all groups except one are higher when a household 
 
 The plot below further examines of the impact of conflict on food security. The estimates in the plot below show the impact of exposure to conflict on the various food security indices. As was done above, the food security indices used were re-scaled between 0 and 1, with higher scores indicating greater food insecurity. 
 
-Notably, the effect of conflict was most pronounced in the Food Insecurity Experience Scores of rural households -- exposure to conflict in these households was linked with a 0.12 increase in score, which is substantial. All the effects were statistically significant with the exception of conflict on Food Consumption Scores in urban contexts (that point is marked by a triangle in the plot below to denote this). 
+Notably, the effect of conflict was most pronounced in the Food Insecurity Experience Scores of rural households -- exposure to conflict in these households was linked with a `r round(filter(survey, shocks_conflict == 1) %>% {mean(.$fs_score4)} - filter(survey, shocks_conflict == 0) %>% {mean(.$fs_score4)}, digits = 3)` increase in score, which is, on average, a `r round((filter(survey, shocks_conflict == 1) %>% {mean(.$fs_score4)} - filter(survey, shocks_conflict == 0) %>% {mean(.$fs_score4)}) / filter(survey, shocks_conflict == 0) %>% {mean(.$fs_score4)} * 100, digits = 2)`% increase. All the effects were statistically significant with the exception of conflict on Food Consumption Scores in urban contexts (that point is marked by a triangle in the plot below to denote this). 
 
 <br>
 
@@ -1029,7 +1047,7 @@ conflict_scatter <- conflict_score %>%
        size = "fatalities",
        caption = "Data source: ACLED; acleddata.com") 
 
-ggplotly(conflict_scatter, tooltip = c("text")) %>% 
+ggplotly(conflict_scatter, tooltip = c("text"), width = 820) %>% 
   # layout(showlegend = FALSE, legend = list(font = list(size = 6))) %>% 
   config(displayModeBar = FALSE) %>% 
   layout(title = list(text = paste0("Conflict events and fatalities by township",
@@ -1078,7 +1096,7 @@ scatter_groups <- fs_pin %>%
        size = "fatalities",
        caption = "Data source: ACLED; acleddata.com") 
 
-ggplotly(scatter_groups, tooltip = c("text")) %>% 
+ggplotly(scatter_groups, tooltip = c("text"), width = 820) %>% 
   # layout(showlegend = FALSE, legend = list(font = list(size = 6))) %>% 
   config(displayModeBar = FALSE) %>% 
   layout(title = list(text = paste0("Conflict events and fatalities by prioritisation group",
@@ -1121,7 +1139,7 @@ pop_scatter <- fs_pin %>%
        size = "conflict\nscore",
        caption = "Data source: ACLED; acleddata.com") 
 
-ggplotly(pop_scatter, tooltip = c("text")) %>% 
+ggplotly(pop_scatter, tooltip = c("text"), width = 820) %>% 
   # layout(showlegend = FALSE, legend = list(font = list(size = 6))) %>% 
   config(displayModeBar = FALSE) %>% 
   layout(title = list(text = paste0("People in need and population density by prioritisation group",
@@ -1217,6 +1235,62 @@ survey %>%
 
 As mentioned earlier, rural households were found to be less resilient and more asset-poor in IFPRI's household welfare survey. These findings align well with the process the Food Security Cluster has developed here to identify priority households (where rural households are significantly more likely to fall into the priority group). It would be extremely fruitful to explore whether this alignment extends to conflict and some of the other environmental and socioeconomic variables that have been employed in this document. 
 
+It should also be noted that townships themselves are quite large -- on average, each has a population of `r summarise(fs_pin, mean = round(mean(population_2021_proj), digits = 0)) %>%  pull() %>% format(big.mark = ",")` persons. In areas where partners are not yet present, this might necessitate an intermediate step to help partners identify specific areas where they could begin working. 
+
+In the ACLED dataset, of the `r filter(acled, year == 2021 & sub_event_type != "Peaceful protest") %>%  nrow() %>%  format(big.mark = ",")` events in 2021, 38% of them were recorded with specific village locations. 
+
+<br>
+
+```{r table-villages}
+acled %>% 
+  filter(year == 2021 & sub_event_type != "Peaceful protest") %>%
+  mutate(has_village = fct_relevel(has_village, c("yes", "no"))) %>% 
+  group_by(has_village) %>% 
+  summarise(events = n(), 
+            fatalities = sum(fatalities),
+            locations = n_distinct(interaction(admin3, location)), .groups = "drop") %>%
+  mutate(`%_events` = round(events / sum(events) * 100, digits = 2), 
+         `%_fatalities` = round(fatalities / sum(fatalities) * 100, digits = 2)) %>% 
+  select(has_village, events, `%_events`, fatalities, `%_fatalities`, locations) %>% 
+  kable(caption = "Conflict events with and without villages", format.args = list(big.mark = ","), 
+        table.attr = "style = 'width:60%;'") %>% 
+  kable_classic_2() %>% 
+  footnote("Data source: ACLED; accleddata.com", general_title = "")
+
+
+```
+
+<br>
+
+Below is an interactive reference table of the 1,907 villages identified in the ACLED dataset, complete with coordinates. While this list does provide an excellent start, by working in these areas, partners should also endeavour to identify the spefici locations of the remaining 62% of conflict events. 
+
+<br>
+
+```{r dt-conflict-villages}
+acled %>%
+  mutate(has_village = fct_relevel(has_village, c("yes", "no"))) %>%
+  filter(year == 2021 & sub_event_type != "Peaceful protest" & has_village == "yes") %>%
+  group_by(admin1, admin3, village = location) %>% 
+  mutate(event_count = 1) %>% 
+  summarise(events = n(), 
+            fatalities = sum(fatalities), 
+            battles = sum(event_count[event_type == "Battles"]), 
+            remote_violence = sum(event_count[event_type == "Explosions/Remote violence"]), 
+            violence_against_civilians = sum(event_count[event_type == "Violence against civilians"]),
+            latitude = max(latitude),
+            longitude = max(longitude)) %>% 
+  arrange(desc(fatalities)) %>% 
+  datatable(filter = list(position = "top", clear = FALSE), 
+            options = list(pageLength = 10, scrollX = TRUE), 
+            caption = htmltools::tags$caption(style = 'caption-side: top;
+                                              text-align: center;
+                                              color: black; font-size: 120%;',
+                                              "Reference table -- conflict-affected villages")) %>% 
+  formatStyle(0, target = "row", lineHeight = "80%", fontSize = "80%")
+
+```
+
+
 <br><br>
 
 ### 2.4 5W results from the first quarter of 2022
@@ -1259,7 +1333,7 @@ ben_target <- fsc %>%
        title = "Targeted population per township vs beneficiaries reached in Q1 2022, by prioritisation group",
        subtitle = "The red line is 100% of target")
 
-ggplotly(ben_target, tooltip = c("text")) %>% 
+ggplotly(ben_target, tooltip = c("text"), width = 820) %>% 
   config(displayModeBar = FALSE) %>% 
   layout(title = list(text = 
                         paste0("Targeted population per township vs beneficiaries reached in Q1 2022",
@@ -1521,20 +1595,19 @@ The specific code for generating the food insecurity score was:
 food_insecurity_score <- survey %>% 
   mutate_at(vars(cs_crisis_sold_prod_assets, cs_crisis_no_school, 
                  cs_crisis_reduced_health_exp), ~ . * 0.5) %>% 
-  select(survey_id, fcs_staple, fcs_pulse, fcs_dairy, 
-         fcs_protein, fcs_veg, fcs_fruit, fcs_fat, fcs_sugar, 
-         cs_crisis_sold_prod_assets, cs_crisis_no_school, cs_crisis_reduced_health_exp, 
-         cs_emergency_sold_house, cs_emergency_hh_migration, cs_emergency_hh_risk,
-         fies_fewfood, fies_skipped, fies_whlday, fies_hungry, fies_ateless, fies_healthy,
-         fies_runout, fies_worried) %>% 
-  mdepriv(c("fcs_staple", "fcs_pulse", "fcs_dairy", 
-            "fcs_protein", "fcs_veg", "fcs_fruit", "fcs_fat", "fcs_sugar",
-            "cs_crisis_sold_prod_assets", "cs_crisis_no_school", 
-            "cs_crisis_reduced_health_exp", "cs_emergency_sold_house", 
-            "cs_emergency_hh_migration", "cs_emergency_hh_risk", 
-            "fies_fewfood", "fies_skipped", "fies_whlday", "fies_hungry", "fies_ateless", 
-            "fies_healthy", "fies_runout", "fies_worried"), 
-          output = "all", method = "cz")
+  select(survey_id, hhfcs_inv, # inverse of food consumption score
+         cs_crisis_sold_prod_assets, cs_crisis_no_school, 
+         cs_crisis_reduced_health_exp, cs_emergency_sold_house, 
+         cs_emergency_hh_migration, cs_emergency_hh_risk,
+         fies_fewfood, fies_skipped, fies_whlday, fies_hungry, 
+         fies_ateless, fies_healthy, fies_runout, fies_worried, combined_wt) %>% 
+  mdepriv(c("hhfcs_inv", 
+         "cs_crisis_sold_prod_assets", "cs_crisis_no_school", 
+         "cs_crisis_reduced_health_exp", "cs_emergency_sold_house", 
+         "cs_emergency_hh_migration", "cs_emergency_hh_risk",
+         "fies_fewfood", "fies_skipped", "fies_whlday", "fies_hungry", 
+         "fies_ateless", "fies_healthy", "fies_runout", "fies_worried"), 
+         output = "all", sampling_weights = "combined_wt")
 
 ```
 
@@ -1550,7 +1623,7 @@ With reference to the plot below of predicted values of the food security score 
 <br>
 
 ```{r}
-ols <- survey %>% select(fs_score2, hoh_female, rural, not_improved_sanitation, 
+ols <- survey %>% select(fs_score4, hoh_female, rural, not_improved_sanitation, 
          contains("edu_"), contains("shocks_"), contains("income_ms"), survey_id) %>% 
   left_join(survey %>% select(survey_id, hoh_age) %>%
               mutate(value = 1) %>%
@@ -1560,18 +1633,17 @@ ols <- survey %>% select(fs_score2, hoh_female, rural, not_improved_sanitation,
   #slice(-c( 69, 297,  660, 1186, 1222, 1256, 1354, 1362, 1720, 
   #          1820, 1823, 1843, 1936, 1950, 1952, 2003, 2132, 2329, 2594)) %>% 
   drop_na() %>% 
-  mutate(fs_score2 = log(fs_score2), 
-         fs_score2 = ifelse(is.infinite(fs_score2), 0, fs_score2)) %>% 
-  lm(fs_score2 ~ ., data = .) 
+  mutate(fs_score4 = log(fs_score4), 
+         fs_score4 = ifelse(is.infinite(fs_score4), 0, fs_score4)) %>% 
+  lm(fs_score4 ~ . + hoh_female:age_over65, data = .) 
 
 survey %>% 
-  mutate(fs_score2 = log(fs_score2), 
-         fs_score2 = ifelse(is.infinite(fs_score2), 0, fs_score2)) %>% 
-  ggplot(aes(x = predict(ols), y = fs_score2)) + 
-  geom_point() + 
+  ggplot(aes(x = predict(ols), y = log(fs_score4))) + 
+  geom_point(alpha = .5) + 
   geom_abline(intercept = 0, slope = 1, lty = 2, colour = "red") + 
   labs(x = "Log of predicted values", y = "Log of actual values", 
-       title = "Predicted vs actual values for food security score") 
+       title = "Predicted vs actual values for the food insecurity score")
+
 
 ```
 
@@ -1634,6 +1706,12 @@ survey_long %>%
   rename(variable = item1, match = item2) %>% 
   group_by(variable) %>% 
   top_n(abs(correlation), n = 20) %>% 
+  filter(variable %out% c("lhcsi_range", "lhcsi_max", "fies_raw_range", "fies_raw", 
+                      "fs_score", "fs_score2", "fs_score3", "fs_score4",
+                      "csi_weighted", "priority", "hhfcs_inv")) %>% 
+  filter(match %out% c("lhcsi_range", "lhcsi_max", "fies_raw_range", "fies_raw", 
+                      "fs_score", "fs_score2", "fs_score3", "fs_score4",
+                      "csi_weighted", "priority", "hhfcs_inv")) %>%
   datatable(filter = list(position = "top", clear = FALSE),
             options = list(pageLength = 10, scrollX = TRUE,
                            search = list(regex = TRUE))) %>% 
@@ -1656,7 +1734,7 @@ $$
 w_j \propto (w_j^a \cdot w_j^b)
 $$
 
-However, it must be noted that whilst the scores themselves can be shared and used, replicating all the calculations will necessitate obtaining permission from UNHCR as their township-level breakdown of IDP populations have not been shared publicly. The specific code for calculating the conflict score can be found below. 
+However, it must be noted that whilst the scores themselves can be shared and used, replicating all the calculations will necessitate obtaining permission from [UNHCR](mailto:Nii Ako Sowa <sowanii@unhcr.org>) as their township-level breakdown of IDP populations have not been shared publicly. The specific code for calculating the conflict score can be found below. 
 
 <br>
 
@@ -1692,15 +1770,10 @@ conflict_score2 <- conflict_df2 %>%
   # IDP counts not selected for inclusion in this dataframe
   left_join(acled %>% 
               distinct(admin1, admin3, admin3_pcode), 
-            by = "admin3_pcode") %>% 
-  left_join(fsc %>%  
-              group_by(admin3_pcode) %>% 
-              summarise(partners = n_distinct(org_code),
-                        beneficiaries = 
-                          sum(beneficiaries[unique_beneficiaries == "Yes"])), 
-            by = "admin3_pcode") %>% 
+            by = "admin3_pcode") %>%
   left_join(conflict_score %>% select(old_conflict_score = score_i, admin3_pcode), 
             by = "admin3_pcode")
 ```
+
 
 
