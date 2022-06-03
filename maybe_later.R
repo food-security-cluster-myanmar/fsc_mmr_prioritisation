@@ -1,3 +1,4 @@
+# unused trees
 tree1 <- fs_pin %>% 
   # mutate_at(vars(c(conflict_score, disaster_prob, population_density)), scale) %>% 
   rpart(conflict_score ~ population_density + fs_pin, 
@@ -14,6 +15,21 @@ fs_pin <- fs_pin %>%
               group_by(rule1) %>% 
               summarise(subrules1 = paste(Subrule, collapse = ",")),
             by = c("rule1", "subrules1"))
+
+tree5 <-  survey %>% 
+  rpart(priority ~  shocks_lostwork + shocks_sicknessdeath + shocks_foodprices + shocks_conflict + shocks_cantworkbusiness +
+          shocks_naturalhazard + shocks_accessmarket + shocks_pricesother + shocks_other + 
+          hoh_female + rural + not_improved_sanitation + children_0_4 + agri_activity + hh_size,
+        data = .,  weights = combined_wt, cp = .0091)
+
+fancyRpartPlot(tree5, digits = -3, sub = "", palettes = "Blues", type = 2)
+
+plotcp(tree5)
+
+
+fancyRpartPlot(tree6, digits = -3, sub = "", palettes = "Blues", type = 2)
+
+plotcp(tree6)
 
 
 # large patchwork plot
@@ -251,3 +267,202 @@ survey %>%
   select(category, hoh_education, `%_difference` = diff) %>%
   kable(caption = "Percentage difference in food security scores") %>% 
   kable_classic_2("striped", full_width = FALSE, position = "left")
+
+# let's not recalculate the vulnerability score 
+# i don't think it's really that useful 
+
+conflict_score %>% 
+  select(admin3_pcode, battles, explosions_remote_violence, protests_and_riots, 
+         strategic_developments, violence_against_civilians) %>% 
+  pivot_longer(cols = c(battles:violence_against_civilians), names_to = "event_type", values_to = "value") %>% 
+  left_join(fs_pin %>% select(admin3_pcode, state), by = "admin3_pcode") %>% 
+  group_by(state) %>% 
+  mutate(total_events = sum(value)) %>% 
+  ungroup() %>% 
+  mutate(state = fct_reorder(state, -total_events)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = state, y = value, fill = event_type)) + 
+  geom_col() +
+  scale_y_continuous(labels = comma) +
+  theme(axis.text.x = element_text(angle = 30, vjust = 0.7, hjust = 0.7), 
+        plot.caption = element_text(hjust = 0.5)) +
+  labs(x = "", 
+       y = "Conflict events",
+       title = "2021 conflict events by state",
+       caption = "Data source: ACLED; acleddata.com")
+
+fs_pin %>%  
+  mutate(vul_pop = vul_env * population_2021_proj) %>% 
+  group_by(state) %>% 
+  summarise(vul_pop = sum(vul_pop), 
+            total_pop = sum(population_2021_proj)) %>% 
+  mutate(vul_pc = vul_pop / total_pop, 
+         state = fct_reorder(state, vul_pop)) %>%  
+  ggplot(aes(x = state, y = vul_pop, fill = vul_pc)) + 
+  geom_col() + 
+  scale_y_continuous(labels = comma, breaks = seq(0, 3000000, by = 500000)) + 
+  scale_fill_viridis(option = "inferno", direction = -1) + 
+  theme(axis.text.x = element_text(angle = 40, vjust = 1, hjust = .9), 
+        plot.caption = element_text(hjust = .5)) + 
+  labs(x = "", y = "Estimated vulnerable population", fill = "vul%",
+       title = "Vulnerability by state", 
+       caption = "Data source: MIMU and ACLED (acleddata.com)")
+
+# alternative clusterings
+km_res3 <- fs_pin %>% 
+  select(population_density, population_2021_proj, conflict_score, mdp_score) %>%
+  mutate_at(vars(population_density:mdp_score), ~ range_wna(.x)) %>% 
+  kmeans(8, nstart = 25)
+
+
+km_res <- fs_pin %>% 
+  select(population_density, conflict_score, mdp_score) %>%
+  mutate_at(vars(population_density:mdp_score), ~ range_wna(.x)) %>% 
+  kmeans(6, nstart = 25)
+
+# the other scatter plot shows the divergence much better 
+
+vul_scatter <- fs_pin %>% 
+  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + 
+           strategic_developments + violence_against_civilians, 
+         vul_env = round(vul_env, digits = 3), 
+         fs_pin = round(fs_pin, digits = 1)) %>% 
+  ggplot(aes(y = vul_env, x = population_density, 
+             text = paste0(township, ",", "\n",
+                           state, ",", "\n",
+                           "vulnerability_score: ", vul_env, "\n", 
+                           "PIN: ", fs_pin, "\n", 
+                           "conflict_events: ", total_events, "\n",
+                           "fatalities: ", fatalities, "\n",
+                           "partners_2021: ", partners_2021))) + 
+  geom_hline(yintercept = .5, colour = "red", lty = 2) + 
+  geom_vline(xintercept = 300, colour = "red", lty = 2) + 
+  geom_text(x = .1, y = .94, label = "C", colour = "grey", size = 7) +
+  geom_text(x = 4.4, y = .94, label = "D", colour = "grey", size = 7) +
+  geom_text(x = .1, y = .44, label = "E", colour = "grey", size = 7) + 
+  geom_text(x = 4.4, y = .44, label = "F", colour = "grey", size = 7) + 
+  geom_point(aes(size = fs_pin, colour = conflict_score), alpha = .7) +
+  scale_colour_viridis(option = "magma", direction = -1) + 
+  # scale_colour_viridis(option = "turbo", direction = -1, trans = "log10") +
+  scale_x_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300, 1000, 3000, 10000), 
+                     labels = comma_format(accuracy = 1)) + 
+  labs(x = "Persons per km2", y = "Vulnerability score", size = "PIN",
+       colour = "conflict\nscore",
+       title = "Vulnenrability and population density by township")
+
+ggplotly(vul_scatter, tooltip = c("text"), width = 820) %>%  
+  config(displayModeBar = FALSE) %>% 
+  layout(title = list(text = paste0("Vulnerability and population density by township",
+                                    "<br>", 
+                                    "<sup>", 
+                                    "Vulnerability score marked by colour; FS PIN marked by size", "</sup>")), 
+         colorscale = list(font = list(size = 4)))
+
+# i think that conflict per capita is not necessarily the most useful indicator,
+# since the amount of conflict is still important in determining how much an area has been affected 
+# i.e. if there have been many battles in one area with a large population, they're probably worse off 
+# than a small area with only one battle 
+# i think that's the asssumption i'll go with  
+
+fs_pin %>% 
+  mutate(conflict_pc = conflict_score / population_2021_proj, 
+         conflict_pc = ifelse(is.infinite(conflict_pc), 0, conflict_pc)) %>% 
+  ggplot(aes(x = mdp_score, y = conflict_pc)) + 
+  geom_point(aes(size = population_2021_proj), alpha = .5) +
+  scale_y_continuous(trans = "log10") + 
+  geom_smooth(method = "lm")
+
+# the new version is just much better
+scatter_groups <- fs_pin %>% 
+  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
+           violence_against_civilians) %>% 
+  ggplot(aes(x = total_events, y = fatalities, colour = cluster, 
+             text = paste0(township, ",", "\n",
+                           state, ",", "\n",
+                           "group: ", cluster, ",", "\n",
+                           "conflict_score: ", conflict_score, ",", "\n",
+                           "fatalities: ", fatalities, ",", "\n",
+                           "vul_score: ", mdp_score))) +
+  geom_point(aes(size = fatalities), alpha = 0.8) +
+  scale_y_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300, 1000)) +
+  scale_x_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300)) +
+  scale_colour_viridis_d(option = "cividis") + 
+  # scale_colour_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
+  geom_hline(aes(yintercept = mean(fatalities, na.rm = TRUE)), colour = "red", lty = 2) +
+  geom_vline(aes(xintercept = mean(total_events, na.rm = TRUE)), colour = "red", lty = 2) +
+  labs(x = "Conflict events", 
+       y = "Fatalities",
+       title = "Conflict events and fatalities by prioritisation group", 
+       subtitle = "Means of both axes are marked by the dotted red line",
+       colour = "group", 
+       size = "fatalities",
+       caption = "Data source: ACLED; acleddata.com") 
+
+
+
+ggplotly(scatter_groups, tooltip = c("text"), width = 820) %>% 
+  # layout(showlegend = FALSE, legend = list(font = list(size = 6))) %>% 
+  config(displayModeBar = FALSE) %>% 
+  layout(title = list(text = paste0("Conflict events and fatalities by prioritisation group",
+                                    "<br>",
+                                    "<sup>",
+                                    "mouse over for details; means marked by red lines; fatalities marked by size","</sup>")))
+
+# no longer needed, also makes things unclear
+pop_scatter <- fs_pin %>% 
+  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
+           violence_against_civilians) %>% 
+  ggplot(aes(x = fs_pin, y = population_density, colour = cluster,
+             text = paste0(township, ",", "\n",
+                           state, ",", "\n",
+                           "group: ", cluster, ",", "\n",
+                           "events: ", total_events, ",", "\n",
+                           "fatalities: ", fatalities, ",", "\n",
+                           "partners_2021: ", partners_2021))) +
+  geom_point(aes(size = conflict_score), alpha = 0.8) +
+  # scale_colour_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
+  scale_colour_viridis_d(option = "cividis") +
+  scale_x_continuous(labels = comma, trans = "log10") +
+  scale_y_continuous(labels = comma_format(accuracy = 1), trans = "log10") +
+  geom_hline(aes(yintercept = mean(population_density, na.rm = TRUE)), colour = "red", lty = 2) +
+  geom_vline(aes(xintercept = mean(fs_pin, na.rm = TRUE)), colour = "red", lty = 2) +
+  labs(x = "People in need", 
+       y = "Population density",
+       title = "People in need and population density by prioritisation group", 
+       subtitle = "Means of both axes are marked by the dotted red line",
+       colour = "group", 
+       size = "conflict\nscore",
+       caption = "Data source: ACLED; acleddata.com") 
+
+ggplotly(pop_scatter, tooltip = c("text"), width = 820) %>% 
+  # layout(showlegend = FALSE, legend = list(font = list(size = 6))) %>% 
+  config(displayModeBar = FALSE) %>% 
+  layout(title = list(text = paste0("People in need and population density by prioritisation group",
+                                    "<br>",
+                                    "<sup>",
+                                    "mouse over for details; means marked by red lines; conflict score marked by size","</sup>")))
+
+# old summary stat by group table
+fs_pin %>% 
+  group_by(group) %>% 
+  summarise(PIN = sum(fs_pin), 
+            target = sum(fs_targeted),
+            conflict_score = mean(conflict_score),
+            ppl_per_km2 = mean(population_density),
+            townships = n()) %>% 
+  mutate_at(vars(c(conflict_score)), ~round(., digits = 3)) %>% 
+  mutate_at(vars(c(PIN, ppl_per_km2, target)), ~ round(.)) %>% 
+  kable(caption = "Summary statistics by township group", format.args = list(big.mark = ",")) %>% 
+  kable_classic_2("striped") %>% 
+  footnote(footnote_as_chunk = TRUE, threeparttable = TRUE, 
+           general = "Groups A1 and A2 have above average conflict scores; groups A1 and B1 have the above average population densities. Townships in groups A1 and A2 should be prioritised over the others.") 
+
+# %>%
+#  save_kable(file = "summary_stats_groups.png", zoom = 2)
+
+# unused text from old prioritisation groups
+# It is additionally recognised that different types of townships necessitate different programming options. And, as established in the first section, rural and urban areas have widely differing numbers of households in the priority group. Therefore, townships have also been split into four simple groups (A1, A2, B1 and B2) based on their conflict score and population density. 
+
+# This grouping separates all 330 townships along two criteria -- **high (A) or low (B) conflict score and high (1) or low (2) population density**. Groups A1 and A2 have above average conflict scores. These 107 townships should be prioritised for humanitarian interventions. Recalling the scatterplot above, the colours have now been updated to reflect the prioritisation group. From the plot below that whilst group A1 have populations that are easier to access (having higher population density), the incidence of conflict is higher overall in group A2, with the numbers of conflict-related fatalities being much higher. This quick-and-dirty prioritisation has managed to exclude almost all the townships in bottom-left quadrant (least conflict-affected) from groups A1 and A2. 
+
+# Groups A1 and A2 can be distinguished by their population density, with the average population density in group A1 being more than 100 times higher than in group A2. The average PIN per township is slightly higher in group A1 than in group A2. The scatterplot below shows townships by the number of people in need (x-axis) and the population density (y-axis), with the colours reflecting which group each belongs to:

@@ -1,5 +1,5 @@
 ---
-title: "Notes on Preliminary Township Prioritisation and Beneficiary Selection"
+title: "Township Prioritisation and Establishing a Beneficiary Profile"
 author: "Myanmar Food Security Cluster"
 date: "25/03/2022"
 output: 
@@ -65,8 +65,10 @@ library(corrplot)
 library(broom)
 library(tidytext)
 library(plotly)
-
+library(ggridges)
 library(RColorBrewer)
+library(factoextra)
+library(ggforce)
 
 theme_set(theme_minimal())
 
@@ -146,8 +148,11 @@ pcode1_shape <- st_read("./mmr_polbnda2_adm1_mimu_250k/mmr_polbnda2_adm1_mimu_25
  rename(state = ST, 
         admin1_pcode = ST_PCODE) %>% st_as_sf()
 
-# reading in 5Ws
-fsc <- read_csv("fsc5w_2021.csv")
+# reading in 5Ws 2021
+fsc_2021 <- read_csv("fsc5w_2021.csv")
+
+# 2022 Q1 5Ws
+fsc <- read_csv("fsc_q1_2022.csv")
 
 # reading in vulnerability dataset
 vulmmr <- read_excel("Datasets_Vulnerability_Analysis_in_Myanmar_09Jul2018 (1).xlsx",
@@ -189,43 +194,100 @@ floods_storm_surge <- read_excel("Flood_Affected_Township_(2008-2021) (1).xlsx")
     flood_prob = select(., starts_with("year_")) %>% rowMeans(na.rm = TRUE),
     flood_count = select(., starts_with("year_")) %>% rowSums(na.rm = TRUE))
 
-# main dataset for this note
-fs_pin <- pin %>% 
+# i think this works our pretty well 
+vul_share <- vulmmr %>% select(avg_safe_sanitation_improved_drinking_water:female_literacy_percent_literate, 
+                  child_dependency_ratio_31, unpaid_family_worker_percent,
+                  admin3_pcode = township_pcode) %>% 
+  left_join(conflict_score %>% select(conflict_score = score_i, admin3_pcode), by = "admin3_pcode") %>% 
+  select(-conflict_index_c_percent_of_max_inverse_percent_of_average_of_envelopes_12, 
+         -unpaid_family_workers_inverse, -child_dependency_ratio_inverse) %>% 
+  mutate_at(vars(avg_safe_sanitation_improved_drinking_water:female_literacy_percent_literate), ~ 1 - .x) %>%
+  mutate(conflict_env = range_wna(conflict_score)) %>%
+  filter(!is.na(admin3_pcode)) %>%  
+  replace(is.na(.), 0) %>% 
+  mdepriv(c("avg_safe_sanitation_improved_drinking_water", "average_good_roof_and_wall", 
+            "highest_education_at_least_middle_school_percent_14", "electricity_for_lighting_percent_15", 
+            "id_card_with_id_total_percent_16", "female_literacy_percent_literate", 
+            "child_dependency_ratio_31", "unpaid_family_worker_percent", "conflict_env"), 
+          method = "cz", output = "all", 
+          score_i_heading = "vul_score")
+
+
+# main township-level dataset
+fs_pin <- pin %>%  
+  left_join(fsc %>% group_by(admin3_pcode_old) %>% 
+              summarise(beneficiaries = sum(new_beneficiaries)),
+            by = c("admin3_pcode" = "admin3_pcode_old")) %>% 
   left_join(conflict_score %>% select(admin3_pcode, battles, explosions_remote_violence, protests_and_riots, 
                                       strategic_developments, violence_against_civilians, 
                                       conflict_score = score_i, fatalities),
             by = "admin3_pcode") %>% 
   left_join(vulmmr %>% select(admin3_pcode = township_pcode, 
-                     area_sown_acres = all_area_sowed_mali, population_density),
+                     area_sown_acres = all_area_sowed_mali, population_density, vulnerability_band, 
+                     old_conflict_score = conflict_index_a_average_of_percent_of_totals,
+                     old_conflict_env = conflict_index_b_average_of_envelopes,
+                     approximate_vulnerable_population ),
             by = "admin3_pcode") %>% 
   left_join(floods_storm_surge %>% 
               select(admin3_pcode, flood_prob, flood_count),
             by = "admin3_pcode") %>% 
-  left_join(fsc %>%
+  left_join(fsc_2021 %>%
               filter(unique_beneficiaries == "Yes") %>%
               group_by(admin3_pcode) %>%
               summarise(beneficiaries_2021 = sum(beneficiaries),
                         partners_2021 = n_distinct(org_code)),
             by = "admin3_pcode") %>% 
-  left_join(fsc %>% filter(date > "2021-09-01") %>%
+  left_join(fsc_2021 %>% filter(date > "2021-09-01") %>%
               group_by(admin3_pcode) %>%
               summarise(ben_6_months = sum(beneficiaries)),
             by = "admin3_pcode") %>% 
   mutate(not_in_6months = ifelse(is.na(ben_6_months), 1, 0)) %>% 
   mutate(fs_pin = ifelse(fs_pin > population_2021_proj, population_2021_proj, fs_pin)) %>% 
-  replace_na(list(conflict_score = 0, beneficiaries_2021 = 0, partners_2021 = 0, flood_prob = 0)) %>% 
+  replace_na(list(conflict_score = 0, beneficiaries = 0, beneficiaries_2021 = 0, partners_2021 = 0, flood_prob = 0)) %>% 
   mutate(conflict_ranking = dense_rank(desc(conflict_score)),
          flood_ranking = dense_rank(desc(flood_prob)),
          fs_pin_ranking = dense_rank(desc(fs_pin)),
          fs_target_ranking = dense_rank(desc(fs_targeted)),
          fs_pin_pc = fs_pin / sum(fs_pin),
          pin_pop = fs_pin / population_2021_proj) %>% 
-  mutate(group = case_when(conflict_score >= mean(conflict_score) & population_density >= 1000 ~ "A1",
+  mutate(old_group = case_when(conflict_score >= mean(conflict_score) & population_density >= 1000 ~ "A1",
                            conflict_score >= mean(conflict_score) & population_density < 1000 ~ "A2",
                            conflict_score < mean(conflict_score) & population_density >= 1000 ~ "B1",
-                           conflict_score < mean(conflict_score) & population_density < 1000 ~ "B2")) 
+                           conflict_score < mean(conflict_score) & population_density < 1000 ~ "B2")) %>% 
+  left_join(vul_share$data %>%  select(-conflict_score), by = "admin3_pcode") %>%  
+  mutate(vul_env = range_wna(vul_score), 
+         vul_ranking = dense_rank(desc(vul_env)), 
+         vul_group = case_when(vul_env >= .5 & population_density >= 300 ~ "C", 
+                               vul_env >= .5 & population_density < 300  ~ "D", 
+                               vul_env < .5 & population_density >= 300 ~ "E", 
+                               vul_env < .5 & population_density < 300 ~ "F")) %>% 
+  mutate(band_text = case_when(vulnerability_band == 1 ~ "1. Extreme outliers, underdevelopment and conflict", 
+                               vulnerability_band == 2 ~ "2. Conflict-affected, poor human development", 
+                               vulnerability_band == 3 ~ "3. Hubs in conflict-affected areas", 
+                               vulnerability_band == 4 ~ "4. Very low access to services and infrastructure", 
+                               vulnerability_band == 5 ~ "5. Agricultural areas with high profits", 
+                               vulnerability_band == 6 ~ "6. Secondary cities/towns in agricultural areas", 
+                               vulnerability_band == 7 ~ "7. Up-and-coming peri-urban and urban areas", 
+                               vulnerability_band == 8 ~ "8. Affluent, urban core")) %>% 
+  rowwise() %>% 
+  mutate(mdp_score = max(c(avg_safe_sanitation_improved_drinking_water:unpaid_family_worker_percent))) %>% 
+  ungroup()
 
-# fs_pin %>% write_csv("fs_pin.csv")
+# k-means clustering and output
+set.seed(123)
+
+km_res2 <- fs_pin %>% 
+  replace_na(list(fatalities = 0)) %>% 
+  select(population_density, conflict_score, mdp_score, fatalities) %>%
+  mutate_at(vars(population_density:fatalities), ~ range_wna(.x)) %>% 
+  kmeans(5, nstart = 25)
+
+# reading it back into fs_pin
+fs_pin <- fs_pin %>% 
+  cbind(cluster = km_res2$cluster) %>% 
+  mutate(cluster = recode(cluster, 
+                          `1` = "A1", `5` = "A2", 
+                          `3` = "B", `2` = "C", `4` = "D"))
 
 # should i just read in the whole survey dataset here? or just read in the csv
 # i don't really know if people are interested in the cleaning process
@@ -511,7 +573,7 @@ survey <- survey %>%
 survey_long <- survey %>%
   select(survey_id, priority, fs_score, fs_score2, fs_score3, fs_score4, meb_pc, 
          contains("cs_"), contains("csi_"), contains("fies"), contains("fcs_"), contains("needs_"), 
-         hhfcs_inv, need, 
+         hhfcs_inv, need, combined_wt, 
          hoh_female, children_0_4, hh_size, hhdisability, 
          rural, expense_food, not_improved_sanitation, income_main_comp, agri_activity,
          lhcsi_max, lhcsi_range, accessmarket) %>% 
@@ -524,9 +586,6 @@ survey_long <- survey %>%
   pivot_longer(cols = -survey_id, names_to = "var", values_to = "value") %>% 
   rbind(survey %>% select(contains("shocks_"), survey_id) %>%
           pivot_longer(cols = -survey_id, names_to = "var", values_to = "value"))
-
-# 2022 Q1 5Ws
-fsc <- read_csv("fsc_q1_2022.csv")
 
 # ACLED dataset
 acled <- read_csv("acled.csv") %>% 
@@ -548,6 +607,7 @@ The first section deals with the development of core beneficiary selection crite
 
 <br>
 
+
 ### References for this report
 * ACLED (2022). ACLED data for Myanmar (2010-2022). https://acleddata.com.
 * Maria Noel Pi Alperin, Philippe Van Kerm (2009). mdepriv: Synthetic indicators of multiple deprivation. Stata command. http://medim.ceps.lu/stata/mdepriv_v3.pdf
@@ -562,7 +622,7 @@ The first section deals with the development of core beneficiary selection crite
 
 <br><br><br>
 
-## 1. Beneficiary Selection using FAO-WFP survey data
+## 1. Beneficiary profile, using FAO-WFP survey data
 
 
 A total of `r nrow(survey) %>% format(big.mark = ",")` households were interviewed in the FAO-WFP Shocks, Agricultural Livelihoods and Food Security Survey in Ayeyarwady, Chin, Kachin, Kayah, Kayin, Mon, Rakhine, Shan and Yangon to monitor food security and livelihoods of persons in Myanmar. Some of the most key data collected were on the various food security indices -- the Food Consumption Score (FCS), the Food Insecurity Experience Scale (FIES) and the Livelihood Coping Strategies Index (CSI). Much more detail can be gleaned from the report itself -- this document focuses only on the aspects of the survey which can be used for prioritisation.
@@ -571,9 +631,9 @@ A composite of the three indices, the Food Insecurity Score has also been calcul
 
 <br><br>
 
-### 1.1 An overview of the food security indicators
+### 1.1 Overview of the food security indicators
 
-The plot below ranks variables in order of their ability to predict the various food insecurity composite indices. Only environmental or demographic variables were taken into account as it would be redundant to predict food security indices using the components of said indices. Only responses that occurred more than 200 times (out of 2,708) in the survey were considered. 
+The plots below ranks variables in order of their ability to predict the various food insecurity composite indices. Only environmental or demographic variables were taken into account as it would be redundant to predict food security indices using the components of said indices. Only responses that occurred more than 200 times (out of 2,708) in the survey were considered. 
 
 Variables that are more red are most likely to result in high food insecurity scores (that is, higher food insecurity) and variables that are more blue are more likely to result in lower food insecurity scores. The dotted red line down the middle at $x=0$ splits variables into whether the predict higher food insecurity (positive numbers) or lower food insecurity (negative numbers). 
 
@@ -651,9 +711,9 @@ survey_long %>%
 
 <br>
 
-The variables that tendo to contribute the most to high food insecurity scores are a household's exposure to conflict, whether or not they lost employment or work opportunities, whether or not they were engaged in casual non-agricultural labour and whether or not they reported no income in the three months prior to the survey. 
+The variables that tend to to contribute the most to high food insecurity scores are a household's exposure to conflict, whether or not they lost employment or work opportunities, whether or not they were engaged in casual non-agricultural labour and whether or not they reported no income in the three months prior to the survey. 
 
-These variables can be thought of as a preliminary list of beneficiary selection criteria for food security and livelihoods programming. This list is, of course, non-exhaustive as it only includes variables that were included in the FAO-WFP survey. 
+These variables can be thought of as a basic beneficiary profile that can inform beneficiary selection criteria for food security and livelihoods programming. This list is, of course, non-exhaustive as it is limited to only the variables that were collected as part of the FAO-WFP survey.
 
 The variables that were the best predictors of low food insecurity were whether or not the head of household had completed higher education, whether or not the main income source of the household was stable non-agricultural employment. 
 
@@ -663,11 +723,9 @@ The variables that were the best predictors of low food insecurity were whether 
 
 An important step is narrowing down the population to a priority group -- Food Security Cluster partners do not have the resources to target all persons.
 
->A household would be consideered  a priority for intervention when above the 75th percentile in at least two out of the three food security indices (food consumption score, coping strategies index and food insecurity experience scale)
+>A household would be considered a priority for intervention when above the 75th percentile in at least two out of the three food security indices (food consumption score, coping strategies index and food insecurity experience scale)
 
-Approximately 34% of the sampled population falls into this priority group. The plot below shows the food security sub-indicators that are the most important in determining whether a household falls into the priority group or not. 
-
-The plots below shows the differences between the average values of food security index components based on whether they are priority households or not. Variables in blue correspond to Coping Strategies Index indicators, those in red to the Food Insecurity Experience Scale. 
+Approximately 34% of the sampled population falls into this priority group. The plots below shows the differences between the average values of food security index components based on whether they are priority households or not. Variables in blue correspond to Coping Strategies Index indicators, those in red to the Food Insecurity Experience Scale. 
 
 Those in green correspond to the Food Consumption Score. For these indicators, they have been rescaled so that a value of 1 shows that a household has not consumed that food group at all in the previous 7 days and a value of 0 shows that they have consumed that food group every day for the past 7 days. 
 
@@ -708,78 +766,97 @@ Households in the priority group were also more than four times as likely to hav
 
 <br> 
 
-### Establishing a beneficiary profile
+### 1.3 Variables considered in the beneficiary profile
 
-```{r comparison-demographic-environmental}
+The interactive reference table below shows the various environmental and demographic variables collected by the FAO-WFP survey. The first column lists the variable name, the second and third show the mean values for each variable based on households inside and outside of the priority group -- for instance, from the table, it can be seen that 2.96% of households within the priority group do not have improved sanitation whereas for households outside of the priority group, this percentage is 1.42%. 
+
+The fourth column shows the percentage difference between households in the priority group and households outside of it. To continue the example, households in the priority group are 107.55% more likely to not have access to improved sanitation than households outside of the priority group. The table is sorted in descending order based on this column. 
+
+The last column is the percentage of the surveyed population that the variable corresponds to. So, in spite of households in the priority group having much lower access to improved sanitation, this variable only applies to 2.23% of the total population, meaning that whilst this indicator might be very predictive of households in the priority group, using it on its own would lead to high exclusion errors as it only applies to a small proportion of the population. Sorting the table by **`%_sample`**. 
+
+<br>
+
+
+```{r dt-comparison-demographic-environmental}
+
+js <- c(
+  "function(settings){",
+  "  var datatable = settings.oInstance.api();",
+  "  var table = datatable.table().node();",
+  "  var caption = 'hh_size shows the population mean in the %_sample column'",
+  "  $(table).append('<caption style=\"caption-side: bottom\">' + caption + '</caption>');",
+  "}"
+)
 
 survey %>% 
-  select(matches("shocks_|hoh_female|rural|expense_food|not_improved|agri_activity|income_ms_|size|children|disability"), survey_id) %>% 
+  mutate(children_0_4 = ifelse(children_0_4 > 0, 1, 0)) %>% 
+  select(matches("shocks_|hoh_female|rural|not_improved|agri_activity|income_ms_|size|children|disability"), survey_id) %>% 
   select(-shocks_none, -crp_landsize, -ruralurban) %>% 
   left_join(survey %>% select(hoh_education, hoh_age, residence_type, survey_id) %>% 
               pivot_longer(cols = -survey_id, names_to = "old_var", values_to = "var") %>%
               mutate(value = 1) %>% 
               select(-old_var) %>% 
-              pivot_wider(names_from = var, values_from = value, values_fill = 0), by = "survey_id") %>%  
-  pivot_longer(cols = -survey_id, names_to = "var", values_to = "value") %>% 
-  left_join(survey %>% select(survey_id, priority), by = "survey_id") %>% 
-  mutate(priority = recode(priority, `0` = "not_priority", `1` = "priority")) %>% 
-  group_by(priority, var) %>% 
-  summarise(mean = mean(value, na.rm = TRUE)) %>% 
-  filter(var != "NA") %>% 
-  pivot_wider(names_from = priority, values_from = mean, values_fill = 0) %>% 
-  mutate(diff_pc = round((priority - not_priority) / not_priority * 100, digits = 2)) %>% 
-  arrange(desc(diff_pc)) %>% 
-  left_join(
-    survey %>%
-      select(matches("shocks_|hoh_female|rural|expense_food|not_improved|agri_activity|income_ms_|size|children|disability"), survey_id) %>% 
-      select(-shocks_none, -crp_landsize) %>% 
-      left_join(survey %>% select(hoh_education, hoh_age, residence_type, survey_id) %>% 
-                  pivot_longer(cols = -survey_id, names_to = "old_var", values_to = "var") %>%
-                  mutate(value = 1) %>% 
-                  select(-old_var) %>% 
-                  pivot_wider(names_from = var, values_from = value, values_fill = 0), by = "survey_id") %>%  
-      pivot_longer(cols = -survey_id, names_to = "var", values_to = "value") %>% 
-      group_by(var) %>% 
-      summarise(sum = sum(value, na.rm = TRUE), 
-                count = n()) %>% 
-      mutate(proportion = round(sum / count * 100, digits = 2)) %>% 
-      select(-sum, -count) %>% 
-      filter(var != "NA"), by = "var"
-  ) %>% 
-  mutate(proportion = case_when(var == "children_0_4" ~ round(938 / 2708 * 100, digits = 2), 
+              pivot_wider(names_from = var, values_from = value, values_fill = 0), by = "survey_id") %>% 
+  select(-`NA`) %>%  
+  left_join(survey %>% select(priority, survey_id), by = "survey_id") %>% 
+  pivot_longer(cols = c(-survey_id, -priority), names_to = "var", values_to = "value") %>% 
+  mutate(count = 1) %>%  
+  group_by(var, priority) %>% 
+  summarise(mean = mean(value)) %>% 
+  mutate(priority = recode(priority, `1` = "priority", `0` = "not_priority")) %>% 
+  pivot_wider(names_from = priority, values_from = mean) %>% 
+  mutate(diff_pc = round((priority - not_priority) / not_priority * 100, digits = 2)) %>%
+  left_join(survey_long %>%
+              left_join(survey %>% select(combined_wt, survey_id), by = "survey_id") %>%
+              mutate(count = ifelse(value > 0, 1, 0)) %>%
+              filter(count == 1) %>% 
+              group_by(var) %>% 
+              summarise(count = sum(combined_wt)), by = "var") %>% 
+  mutate(pc_sample = round(count / sum(survey$combined_wt) * 100, digits = 2)) %>% 
+  mutate_at(vars(priority, not_priority), ~round(.x * 100, digits = 2)) %>%  
+  mutate(pc_sample = case_when(var == "children_0_4" ~ round(sum(survey[which(survey$children_0_4 > 0), 331]) / 
+                                                              sum(survey$combined_wt) * 100, digits = 2), 
                                 var == "hh_size" ~ 5.10, 
-                                TRUE ~ proportion),
-         priority = round(priority * 100, digits = 2), 
-         not_priority = round(not_priority * 100, digits = 2)) %>% 
-  rename(`%_sample` = proportion, `%_diff` = diff_pc, variable = var) %>% 
+                                TRUE ~ pc_sample), 
+         var = str_replace(var, "ms", "source")) %>%  
+  arrange(desc(diff_pc)) %>%
+  select(variable = var, mean_priority = priority, mean_not_priority = not_priority, 
+         `%_difference` = diff_pc, `%_sample` = pc_sample) %>% 
   datatable(filter = list(position = "top", clear = FALSE),
-            options = list(pageLength = 15, scrollX = TRUE),
-            caption = htmltools::tags$caption(style = "caption-side: top;
+            options = list(pageLength = 10, scrollX = TRUE,
+              initComplete = JS(js),#This will avoid looping of the caption when there is pagination
+              headerCallback = DT::JS("function(thead) {", 
+                          "  $(thead).css('font-size', '.8em');",
+                          "}")),
+  caption = htmltools::tags$caption(style = "caption-side: top;
                                               text-align: center; font-size: 130%;",
-                                              "Components of the beneficiary profile")) %>% # rewrite this when you're not tired
+                                              "Possible component of a beneficiary profile"), 
+  ) %>% 
   formatStyle(0, target = "row", lineHeight = "80%", fontSize = "80%")
-  
-# i kinda hate having to do it this way, but i don't have time
-# survey %>% 
-#   mutate(has_children_0_4 = ifelse(children_0_4 > 0, 1, 0)) %>% 
-#   {sum(.$has_children_0_4)}
-# 
-# mean(survey$hh_size, na.rm = TRUE)
-  
+
 ```
+
+<br>
+
+As expected, given that the priority grouping is largely based on the Food Consumption Score, Coping Strategies Index and the Food Insecurity Experience Scale, the variables that are least likely (as can be seen by their negative **`%_difference`**) to be associated with households in the priority group are the household head having completed higher education, having a stable source of non-agricultural income, having the main income source be from livestock and having self-employment or non-work (rents etc.) being the main income source. 
+
+Partners are encouraged to make use of the list of variables above, in addition to community perspectives and their own expert judgement, to formulate the beneficiary selection criteria for their food security programmes. The next section makes use of decision trees to find which of these variables are the most useful in splitting the population into households within the priority group and those outside of it. 
 
 
 <br><br>
 
-### 1.3 Decision tree
+### 1.4 Decision trees
 
 ```{r df-tree-rules}
 
 tree4 <- survey %>% 
   rpart(priority ~  shocks_lostwork + shocks_sicknessdeath + shocks_foodprices + shocks_conflict + shocks_cantworkbusiness +
-          shocks_naturalhazard + shocks_accessmarket + shocks_pricesother + shocks_other + 
-          hoh_female + rural + not_improved_sanitation,
+          shocks_naturalhazard + shocks_accessmarket + shocks_pricesother + shocks_other + rural + not_improved_sanitation,
         data = .,  weights = combined_wt , cp = 0.01)
+
+tree6 <- survey %>% 
+  mutate(children_0_4 = ifelse(children_0_4 > 0, 1, 0)) %>% 
+  rpart(priority ~ children_0_4 + hoh_female + hoh_education + hoh_age, data = ., weights = combined_wt, cp = .0088)
 
 survey <- survey %>% 
   mutate(rule4 = row.names(tree4$frame)[tree4$where]) %>% 
@@ -787,34 +864,58 @@ survey <- survey %>%
               filter(Leaf == TRUE) %>% 
               rename(rule4 = Rule) %>% 
               group_by(rule4) %>% 
-              summarise(subrules4 = paste(Subrule, collapse = ",")), by = "rule4") 
+              summarise(subrules4 = paste(Subrule, collapse = ",")), by = "rule4") %>% 
+  mutate(rule6 = row.names(tree6$frame)[tree6$where]) %>% 
+  left_join(rpart.rules.table(tree6) %>% 
+              filter(Leaf == TRUE) %>% 
+              rename(rule6 = Rule) %>% 
+              group_by(rule6) %>% 
+              summarise(subrules6 = paste(Subrule, collapse = ",")), by = "rule6")
+
 
 ```
 
 
-However large the differences are between the food security statuses of those in the priority group and those outside of it, many of these indicators are not easily observable. And it would not be feasible to conduct a large-scale food security survey to determine the food consumption score for all potential beneficiary households.   
+This section focuses on the creation of simple tools to aid in the identification of households in the priority group. This involves narrowing down the list of 36 variables in the reference table above to develop two simple decision trees, one focused on a household's environment and circumstances and the other on a household's demographics. 
 
-This necessitates the creation of simple tool to aid in prioritisation. A decision tree has been developed, considering only the variables in the FAO-WFP survey that are easily observable. The tree below takes into account only three variables -- whether or not a household is in a rural area, whether or not they have experienced violence, insecurity or conflict in the past three months and whether or not they have lost work or employment opportunities in the past three months. 
+Both these trees have been kept simple as making them deeper (i.e. by including additional variables and more nodes) provides very limited gains in exchange for a lot of added complexity. Additionally, as decision trees grow larger, they get much less interpretable. 
 
-Within each blue square, the figure in **bold** show the **percentage of each group that are priority households** and the figures in *italics* show the *percentage of the overall population* in each node. 
+Each tree starts at the root, node *[1]*  in this case, which contains the entire population. From there, it branches out based on the various conditions at each node until it terminates in four groups (4, 5, 6 and 7 in the tree below). Within each blue square, the figure in **bold** show the **percentage of each group that are priority households** and the figures in *italics* show the *percentage of the overall population* in each node. 
+
+The first tree, dealing with a household's environment and circumstances is comprised of three splits -- whether a household is in a rural area, whether they have experienced violence, insecurity or conflict and whether they have lost work or employment opportunities. 
 
 <br>
 
-**Decision tree**
+**Decision tree -- environment and circumstances**
 ![](decision_tree.png)
 <br>
 
 The percentage of priority households in rural areas is much higher than in urban ones (37.6% vs 26.1%). For rural areas, the indicator that best distinguishes priority households is whether or they have directly experienced violence, insecurity or conflict in the past three months. The factor that best distinguishes priority households in urban areas is whether or not they have lost work or employment opportunities in the past three months.  
 
-The performance of the decision tree is not exactly spectacular -- if a partner wanted to target an entire community, the threshold for blanket coverage would be around 75% or 80% of households being in the priority group which none of the nodes achieve. But the decision tree is very simple and understandable (the last section on technical notes explains why a linear regression model was not employed here). Additional beneficiary selection criteria will be necessary, but this decision tree does at least give some direction at the community level once geographic prioritisation has been conducted (which is which is the topic of section 2). 
+The performance of the decision tree is not exactly spectacular -- if a partner wanted to target an entire community, the threshold for blanket coverage would be around 75% or 80% of households being in the priority group, which none of the terminal nodes achieve. But the tree is very understandable at least provides some direction for identifying beneficiaries at the community level once geographic prioritisation has been conducted (which is the topic of section 2). 
 
-As a note, these findings are consistent with IFPRI's survey on household welfare where rural households were found to be more asset-poor and less resilient than urban ones. However, much more work remains to be done on triangulating the FAO-WFP survey with the IFPRI one, which was much more comprehensive in scope and scale. 
+These findings are also consistent with IFPRI's survey on household welfare where rural households were found to be more asset-poor and less resilient than urban ones. However, much more work remains to be done on triangulating the FAO-WFP survey with the IFPRI one, which was much more comprehensive in scope and scale. 
+
+The second tree below makes use of demographic variables (age of head of household, whether or not the head of the household is female etc.). These have been treated separately from the environmental and circumstantial variables above as combining them led to trees that did not make sense i.e. whether or not a household has children under 5 should have no bearing on whether or not they lost access to markets in the past three months. Both trees start from the same root i.e. 100% of the population. 
+
+In the second tree below, which splits the population into three terminal nodes (B, D and E), households whose heads have not completed secondary and/or higher education *and* have children under 5 years of age are most likely to fall into the priority group (46.8%). Households whose heads have competed secondary and/or higher education are least likely to fall into the priority group, irrespective of the age of their children or even if they have children.  
+
+<br>
+
+**Decision tree -- demographics**
+![](decision_tree_demographics.png)
+<br>
+
+These decision trees have been constructed not to direct decisions in partners' programmes, but more to inform them, and should not be treated as absolutes -- there are a wide variety of contexts in Myanmar and each community will likely have additional relevant criteria. 
+
+But the application of the conditions set in this tree and the first one (in blue) will lead to much lower inclusion and exclusion errors in beneficiary selection. The Food Security Cluster remains open to more data that will help improve our collective understanding of food insecurity in Myanmar. 
+
 
 <br><br>
 
-### 1.4 Exceptions for targeting agricultural households
+### 1.5 Exceptions for targeting agricultural households
 
-64.7% of the total population is in the tree node *[6]* (the nodes are all numbered in the decision tree above) -- within this group are households who reside in rural areas but have not been affected by violence, conflict or insecurity. Given that this is a significant chunk of the population where, with reference to the plot below, 78% of the population is involved in agriculture, an exception can be made in this one instance, to support partners who want to select beneficiaries within the large group of agricultural households who have not been affected by conflict.  
+Returning momentarily to the first tree on environmental and circumstantial variables (in blue), 64.7% of the total population is in the tree node *[6]* (the nodes are all numbered in the decision tree above) -- within this group are households who reside in rural areas but have not been affected by violence, conflict or insecurity. Given that this is a significant chunk of the population where, with reference to the plot below, 78% of the population is involved in agriculture, an exception can be made in this one instance, to support partners who might want to select beneficiaries within the large group of agricultural households who have not been affected by conflict.  
 
 It must still be mentioned that aid must first flow to the households in node *[7]*, where the proportion of households in the priority group is highest. Only after the needs of this population are met should households in node *[6]* be targeted. 
 
@@ -845,7 +946,7 @@ survey %>%
 
 <br> 
 
-The tree below carries on from node *[6]* of the main decision tree in the section above. Within this group of rural households not affected by conflict (64.7% of the total population), identifying households who have lost access to markets due to conflict, infrastructure damage or other access issues and households who have been affected by natural hazards (the most common of which is flooding) improves the chances of targeting households in the priority group to slightly above 50%. 
+The tree below carries on from node *[6]* of the main decision tree on environmental and circumstantial variables. Within this group of rural households not affected by conflict (64.7% of the total population), identifying households who have lost access to markets due to conflict, infrastructure damage or other access issues and households who have been affected by natural hazards (the most common of which is flooding) improves the chances of targeting households in the priority group to slightly above 50%. 
 
 Any further conditions applied on the tree only result in extremely marginal gains. 
 
@@ -856,16 +957,16 @@ Any further conditions applied on the tree only result in extremely marginal gai
 
 <br>
 
-It is perhaps best to target priority households in these areas by establishing clear beneficiary selection criteria. The plot below shows the coefficient estimates of environmental and demographic variables on food insecurity within the households in node *[6]*. 
+To further inform the selection of beneficiaries in these areas, the plot below shows the coefficients of environmental and demographic variables on food insecurity within the households in node *[6]*. The more positive (more red) the coefficient, the higher the impact on food insecurity.  
 
-The variables within the FAO-WFP survey most of use to partners targeting priority households in node *[6]* are whether or not a household has improved sanitation and the educational attainment of the head of the household. The most important shocks for this group were natural hazards and the loss of work or employment opportunities. These variables constitute several core criteria fo beneficiary selection for rural households that have not been affected by conflict.
+The variables within the FAO-WFP survey most of use to partners targeting priority households in node *[6]* are whether or not a household has improved sanitation and the educational attainment of the head of the household. The most important shocks for this group were natural hazards and the loss of work or employment opportunities. 
 
 <br>
 
 ```{r coef-plot-node6}
 survey %>% filter(rule4 == 6) %>% 
   select(contains("shocks_"), not_improved_sanitation, contains("income_ms_"),
-         hoh_education, hoh_female, hoh_age, fs_score4) %>% 
+         hoh_education, hoh_female, hoh_age, fs_score4, children_0_4) %>% 
   select(-c(shocks_conflict, income_ms_fisheries)) %>% 
   mutate(fs_score4 = log(fs_score4)) %>% 
   mutate(fs_score4 = ifelse(is.infinite(fs_score4), 0, fs_score4)) %>% 
@@ -885,23 +986,26 @@ survey %>% filter(rule4 == 6) %>%
           axis.text.y = element_text(size = 8.5),
           axis.title.x = element_text(size = 7, face = "bold")) +
     labs(x = "Estimate", y = "", 
-         title = "Coefficient plot for households in tree node [6]")
+         title = "Coefficient plot for households in tree node [6]", 
+         subtitle = "Higher scores are more predictive of food insecurity")
 
 ```
 
 
 <br><br>
 
-### 1.5 Impact of conflict on food security
+### 1.6 Impact of conflict on food security
 
-Conflict has a real, though sometimes limited impact on food security. Though the FAO-WFP survey was not developed with measuring the impact of conflict in mind, it is nevertheless possible to control for some factors and examine the impact of conflict on several groups. 
+Conflict has a real impact on food security. Exposure to conflict in these households was linked with a `r round(filter(survey, shocks_conflict == 1) %>% {mean(.$fs_score4)} - filter(survey, shocks_conflict == 0) %>% {mean(.$fs_score4)}, digits = 3)` increase in score, which is, on average, a `r round((filter(survey, shocks_conflict == 1) %>% {mean(.$fs_score4)} - filter(survey, shocks_conflict == 0) %>% {mean(.$fs_score4)}) / filter(survey, shocks_conflict == 0) %>% {mean(.$fs_score4)} * 100, digits = 2)`% higher.
+
+Though the FAO-WFP survey was not developed with measuring the impact of conflict in mind, it is nevertheless possible to control for some factors and examine the impact of conflict on several groups. 
 
 The plot below shows the impact on the overall food insecurity scores based on whether a household has been impacted by conflict or not. We have selected the two largest groups within the rural and urban context (farmers and workers employed in stable, non-agricultural employment) and have split these populations by education level. 
 
 <br>
 
 ```{r facet-conflict-impact}
-conf_impact <- function(tbl) {
+conflict_impact <- function(tbl) {
   tbl %>% 
     group_by(hoh_education, shocks_conflict) %>% 
     filter(!is.na(hoh_education),
@@ -916,12 +1020,12 @@ conf_impact <- function(tbl) {
   
 survey %>% 
   filter(income_ms_stable_non_ag == 1 & rural == 0) %>%
-  conf_impact() %>% 
+  conflict_impact() %>% 
   mutate(category = "urban_workers") %>% 
   rbind(
     survey %>% 
       filter(income_ms_agriculture == 1 & rural == 1) %>% 
-      conf_impact() %>% 
+      conflict_impact() %>% 
       mutate(category = "rural_farmers")
   ) %>% 
   ggplot(aes(x = mean_score, y = hoh_education, fill = shocks_conflict)) + 
@@ -940,11 +1044,12 @@ survey %>%
 
 <br>
 
+
 The food insecurity scores of all groups except one are higher when a household has experienced conflict. This by no means constitutes a scientific proof (another survey would have to be conducted), but it is possible to state with some confidence that exposure to conflict has a negative impact on food security. The small sample size likely results in widely diverging values in some cases; additionally the purpose of the FAO-WFP survey was not to understand conflict dynamics. 
 
 The plot below further examines of the impact of conflict on food security. The estimates in the plot below show the impact of exposure to conflict on the various food security indices. As was done above, the food security indices used were re-scaled between 0 and 1, with higher scores indicating greater food insecurity. 
 
-Notably, the effect of conflict was most pronounced in the Food Insecurity Experience Scores of rural households -- exposure to conflict in these households was linked with a `r round(filter(survey, shocks_conflict == 1) %>% {mean(.$fs_score4)} - filter(survey, shocks_conflict == 0) %>% {mean(.$fs_score4)}, digits = 3)` increase in score, which is, on average, a `r round((filter(survey, shocks_conflict == 1) %>% {mean(.$fs_score4)} - filter(survey, shocks_conflict == 0) %>% {mean(.$fs_score4)}) / filter(survey, shocks_conflict == 0) %>% {mean(.$fs_score4)} * 100, digits = 2)`% increase. All the effects were statistically significant with the exception of conflict on Food Consumption Scores in urban contexts (that point is marked by a triangle in the plot below to denote this). 
+Notably, exposure to conflict had the largest impact on the Food Insecurity Experience Scale in rural areas. All the effects were statistically significant with the exception of conflict on Food Consumption Scores in urban contexts (that point is marked by a triangle in the plot below to denote this). 
 
 <br>
 
@@ -1004,16 +1109,49 @@ survey %>%
 
 <br>
 
-In the next section, conflict scores will be used to prioritise between townships.
+Approximately 6% of all the households surveyed by FAO-WFP were directly affected by conflict, violence and insecurity. However, this does discount households that have been affected by the secondary impacts of conflict, such as loss of access to markets and increased food prices. 
+
+Whilst there is no set threshold whereby one can state that everyone in a given area has been affected by conflict, it is possible to determine where the conflict has been the most severe. In the next section, conflict scores, together with pre-existing vulnerability will be used to prioritise between townships.
 
 
 <br><br><br>
 
-## 2. Distribution of conflict events in Myanmar
+## 2. Prioritisation of townships by exposure to conflict and pre-existing vulnerability
 
-Approximately 6% of all the households surveyed by FAO-WFP were directly affected by conflict, violence and insecurity. This discounts households that have been affected by the secondary impacts of conflict, such as loss of access to markets and increased food prices. Whilst there is no set threshold whereby one can state that everyone in a given area has been affected by conflict, it is possible to determine where the conflict has been the most severe.
+Myanmar had the most conflict events out of any country in 2021, exceeding Syria, Yemen and Afghanistan. 
 
-Similar to how the basic criteria beneficiary selection at the household level was described in the section above, this section will focus on how to prioritise amongst the various geographic areas in Myanmar. For a more comprehensive review of conflict in Myanmar, please refer to the Food Security Cluster's report [Understanding Conflict Dynamics in Myanmar through Conflict and Incident Data: A Food Security Perspective](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/). 
+<br>
+
+```{r table-conflict-years-compare}
+acled %>% 
+  filter(sub_event_type != "Peaceful protest" & year != 2022) %>% 
+  mutate(years = ifelse(year != 2021, "2010-2020", year)) %>%
+  group_by(years) %>%
+  summarise(total_events = n()) %>% 
+  mutate(avg_events_per_year = ifelse(years == 2021, total_events, total_events / 11)) %>% 
+  left_join(acled %>%
+              filter(sub_event_type != "Peaceful protest" & year != 2022) %>% 
+              mutate(years = ifelse(year != 2021, "2010-2020", year)) %>%
+              group_by(years) %>%
+              summarise(total_fatalities = sum(fatalities)) %>% 
+              mutate(avg_fatalities_per_year = ifelse(years == 2021, total_fatalities, total_fatalities / 11)), 
+            by = "years") %>%
+  mutate_at(vars(avg_events_per_year, avg_fatalities_per_year), ~round(.x, digits = 0)) %>% 
+  kable(caption = "Increase in conflict events and fatalities compared to previous decade", 
+        format.args = list(big.mark = ",")) %>% 
+  kable_classic_2("striped") %>% 
+  footnote("Data source: ACLED; accleddata.com", general_title = "")
+   
+
+```
+
+<br>
+
+Given the more than fourteenfold increase in conflict events and thirteenfold increase in conflict fatalities in Myanmar in 2021 (compared to the average for the preceding 10 years), conflict will be major part of determining which areas have the greatest humanitarian needs. However, scoring townships based only on one variable would lead to a very uni-dimensional understanding of the crisis. 
+
+Similar to how a beneficiary profile was established in order to inform beneficiary selection, this section, will focus on what variables should be considered when prioritising amongst the various geographic areas in Myanmar and how the results of such a prioritisation should be applied. As with earlier sections, the analysis here is meant to describe and inform programmatic and operational decision making, as opposed to dictating it, as each partner will have their own considerations and limitations. 
+
+For a more comprehensive review of conflict in Myanmar, please refer to the Food Security Cluster's report [Understanding Conflict Dynamics in Myanmar through Conflict and Incident Data: A Food Security Perspective](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/). And for a more comprehensive review of multidimensional vulnerabilty in Myanmar, please refer to MIMU-HARP's [Vulnerability Study](http://themimu.info/sites/themimu.info/files/documents/Report_Vulnerability_in_Myanmar_HARP-MIMU_Jun2018_ENG_Print_version.pdf).  
 
 <br><br>
 
@@ -1045,7 +1183,7 @@ conflict_score %>%
 
 <br>
 
-Sagaing saw the highest number of conflict events as well as conflict as well as conflict-related fatalities in 2012. It experienced more than three times as many conflict-related fatalities than the next-highest state/region -- Magway. This is a significant shift in the pattern of conflict in Myanmar, which has traditionally revolved around Kachin, Rakhine and Shan. 
+Starting at the state/region level, Sagaing saw the highest number of conflict events as well as conflict as well as conflict-related fatalities in 2012. It experienced more than three times as many conflict-related fatalities than the next-highest state/region -- Magway. This is a significant shift in the pattern of conflict in Myanmar, which has traditionally revolved around Kachin, Rakhine and Shan. 
 
 Kayah, Chin and Sagaing had the highest number of conflict fatalities per capita in 2021. 
 
@@ -1082,20 +1220,21 @@ conflict_score %>%
 
 ### 2.2 Conflict score by township
 
-As can be seem from the barplots in the previous section, the distribution of conflict events and fatalities is not even, being skewed to a few states/regions. This is also evident at township level. In the scatterplot below, the averages of the number of conflict events and the number of fatalities at the township level have been marked by the dotted red lines, dividing the plot into four quadrants. 
+As can be seem from the state/region barplots in the previous section, the distribution of conflict events and fatalities is not even, being skewed to a few states/regions. This is also evident at township level. In the scatter plot below, the averages of the number of conflict events and the number of fatalities at the township level have been marked by the dotted red lines, dividing the plot into four quadrants. 
 
-A requisite for any prioritisation score or index develop should be to target, first and foremost, the townships in the upper right quadrant of the plot, which have the heaviest concentrations of conflict events and fatalities. These areas are where, as we have established in the section on beneficiary selection, where the highest concentrations of households in the priority group will be found. For reference, 58 townships have both above-average numbers of conflict events and fatalities (upper-right quadrant) and 196 townships have both below-average numbers of conflict events and fatalities (bottom-left quadrant). 
+To better discriminate amongst the numerous townships, a conflict score has been developed. A requisite for any prioritisation score or index for conflict should be the ability to distinguish, first and foremost, the townships in the upper right quadrant of the plot, which have the heaviest concentrations of conflict events and fatalities. These areas are also where, as we have established in the section on beneficiary selection, where the highest concentrations of households in the priority group will be found. For reference, 58 townships have both above-average numbers of conflict events and fatalities (upper-right quadrant) and 196 townships have both below-average numbers of conflict events and fatalities (bottom-left quadrant). 
 
 <br>
 
-```{r conflict-scatterplot}
+```{r plotly-conflict-scatterplot}
 conflict_scatter <- conflict_score %>% 
   mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
            violence_against_civilians) %>% 
   left_join(fs_pin %>% select(state, township, partners_2021, admin3_pcode, population_density), by = "admin3_pcode") %>% 
-  ggplot(aes(y = fatalities, x = total_events, colour = total_events, 
-             text = paste0(township, ",", "\n",
-                           state, ",", "\n",
+  mutate(score_i = round(score_i, digits = 3)) %>% 
+  ggplot(aes(y = fatalities, x = total_events, colour = score_i, 
+             text = paste0(township, ",",state, ",", "\n",
+                           "conflict_score: ", score_i, "\n", 
                            "events: ", total_events, ",", "\n",
                            "fatalities: ", fatalities, ",", "\n",
                            "partners_2021: ", partners_2021))) +
@@ -1109,7 +1248,7 @@ conflict_scatter <- conflict_score %>%
        y = "Fatalities",
        title = "Conflict events and fatalities by township", 
        subtitle = "Means of both axes are marked by the dotted red line",
-       colour = "conflict\nevents", 
+       colour = "conflict\nscore", 
        size = "fatalities",
        caption = "Data source: ACLED; acleddata.com") 
 
@@ -1127,128 +1266,247 @@ ggplotly(conflict_scatter, tooltip = c("text"), width = 820) %>%
 
 <br>
 
-At its most basic, the conflict score is just the average of battles, explosions, remote violence, violence against civilians, strategic developments, non-peaceful protests and riots, conflict-related fatalities and IDPs. More details can be found in the FSC;s report [Understanding Conflict Dynamics in Myanmar through Conflict and Incident Data: A Food Security Perspective](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/). This score will be now be used as a shorthand for conflict incidence in Myanmar.
-
-It is additionally recognised that different types of townships necessitate different programming options. And, as established in the first section, rural and urban areas have widely differing numbers of households in the priority group. Therefore, townships have also been split into four simple groups (A1, A2, B1 and B2) based on their conflict score and population density. 
-
-This grouping separates all 330 townships along two criteria -- **high (A) or low (B) conflict score and high (1) or low (2) population density**. Groups A1 and A2 have above average conflict scores. These 107 townships should be prioritised for humanitarian interventions. Recalling the scatterplot above, the colours have now been updated to reflect the prioritisation group. From the plot below that whilst group A1 have populations that are easier to access (having higher population density), the incidence of conflict is higher overall in group A2, with the numbers of conflict-related fatalities being much higher. This quick-and-dirty prioritisation has managed to exclude almost all the townships in bottom-left quadrant (least conflict-affected) from groups A1 and A2. 
-
-<br>
-
-
-```{r scatterplot-groups}
-scatter_groups <- fs_pin %>% 
-  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
-           violence_against_civilians) %>% 
-  ggplot(aes(x = total_events, y = fatalities, colour = group, 
-             text = paste0(township, ",", "\n",
-                           state, ",", "\n",
-                           "group: ", group, ",", "\n",
-                           "events: ", total_events, ",", "\n",
-                           "fatalities: ", fatalities, ",", "\n",
-                           "partners_2021: ", partners_2021))) +
-  geom_point(aes(size = fatalities), alpha = 0.8) +
-  scale_y_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300, 1000)) +
-  scale_x_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300)) +
-  scale_colour_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
-  # scale_colour_viridis_d(option = "cividis") +
-  geom_hline(aes(yintercept = mean(fatalities, na.rm = TRUE)), colour = "red", lty = 2) +
-  geom_vline(aes(xintercept = mean(total_events, na.rm = TRUE)), colour = "red", lty = 2) +
-  labs(x = "Conflict events", 
-       y = "Fatalities",
-       title = "Conflict events and fatalities by prioritisation group", 
-       subtitle = "Means of both axes are marked by the dotted red line",
-       colour = "group", 
-       size = "fatalities",
-       caption = "Data source: ACLED; acleddata.com") 
-
-ggplotly(scatter_groups, tooltip = c("text"), width = 820) %>% 
-  # layout(showlegend = FALSE, legend = list(font = list(size = 6))) %>% 
-  config(displayModeBar = FALSE) %>% 
-  layout(title = list(text = paste0("Conflict events and fatalities by prioritisation group",
-                                    "<br>",
-                                    "<sup>",
-                                    "mouse over for details; means marked by red lines; fatalities marked by size","</sup>")))
-
-```
-
-<br>
-
-Groups A1 and A2 can be distinguished by their population density, with the average population density in group A1 being more than 100 times higher than in group A2. The average PIN per township is slightly higher in group A1 than in group A2. The scatterplot below shows townships by the number of people in need (x-axis) and the population density (y-axis), with the colours reflecting which group each belongs to:
-
-<br>
-
-
-```{r}
-pop_scatter <- fs_pin %>% 
-  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
-           violence_against_civilians) %>% 
-  ggplot(aes(x = fs_pin, y = population_density, colour = group,
-             text = paste0(township, ",", "\n",
-                           state, ",", "\n",
-                           "group: ", group, ",", "\n",
-                           "events: ", total_events, ",", "\n",
-                           "fatalities: ", fatalities, ",", "\n",
-                           "partners_2021: ", partners_2021))) +
-  geom_point(aes(size = conflict_score), alpha = 0.8) +
-  scale_colour_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
-  # scale_colour_viridis_d(option = "cividis") +
-  scale_x_continuous(labels = comma, trans = "log10") +
-  scale_y_continuous(labels = comma_format(accuracy = 1), trans = "log10") +
-  geom_hline(aes(yintercept = mean(population_density, na.rm = TRUE)), colour = "red", lty = 2) +
-  geom_vline(aes(xintercept = mean(fs_pin, na.rm = TRUE)), colour = "red", lty = 2) +
-  labs(x = "People in need", 
-       y = "Population density",
-       title = "People in need and population density by prioritisation group", 
-       subtitle = "Means of both axes are marked by the dotted red line",
-       colour = "group", 
-       size = "conflict\nscore",
-       caption = "Data source: ACLED; acleddata.com") 
-
-ggplotly(pop_scatter, tooltip = c("text"), width = 820) %>% 
-  # layout(showlegend = FALSE, legend = list(font = list(size = 6))) %>% 
-  config(displayModeBar = FALSE) %>% 
-  layout(title = list(text = paste0("People in need and population density by prioritisation group",
-                                    "<br>",
-                                    "<sup>",
-                                    "mouse over for details; means marked by red lines; conflict score marked by size","</sup>")))
-```
-
-<br>
-
-The table below provides some summary statistics for each of the four groups. Included are the PIN and population targeted within the townships in each group, the average conflict score (higher conflict scores indicate a higher incidence of conflict), the average population density and the number of townships within each group: 
-
-<br>
-
-```{r table-summary-stats-group}
-fs_pin %>% 
-  group_by(group) %>% 
-  summarise(PIN = sum(fs_pin), 
-            target = sum(fs_targeted),
-            conflict_score = mean(conflict_score),
-            ppl_per_km2 = mean(population_density),
-            townships = n()) %>% 
-  mutate_at(vars(c(conflict_score)), ~round(., digits = 3)) %>% 
-  mutate_at(vars(c(PIN, ppl_per_km2, target)), ~ round(.)) %>% 
-  kable(caption = "Summary statistics by township group", format.args = list(big.mark = ",")) %>% 
-  kable_classic_2("striped") %>% 
-  footnote(footnote_as_chunk = TRUE, threeparttable = TRUE, 
-           general = "Groups A1 and A2 have above average conflict scores; groups A1 and B1 have the above average population densities. Townships in groups A1 and A2 should be prioritised over the others.") 
-
-# %>%
-#  save_kable(file = "summary_stats_groups.png", zoom = 2)
-  
-```
+At its most basic, the conflict score is just the average of battles, explosions, remote violence, violence against civilians, strategic developments, non-peaceful protests and riots, conflict-related fatalities and IDPs (refer to section 4.5 for more details). Additional information can also be found in the FSC's report [Understanding Conflict Dynamics in Myanmar through Conflict and Incident Data: A Food Security Perspective](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/). This score will be now be used as a shorthand for conflict incidence in Myanmar going forward. 
 
 <br><br>
 
-### 2.3 Linking geographic prioritisation and beneficiary selection 
+### 2.3 Comparison with multidimensional vulnerability
 
-Using the classifications from the decision tree in section 1.3, we can see that in rural areas, the highest proportions of people who are in the priority group are those who have been affected by conflict, followed by those who were affected by conflict and have lost work or employment opportunities. Rural areas severely-affected by conflict (the townships in group A2) are the areas in which we may reach populations with the highest proportions of households in the priority group.
+However, conflict, in spite of its out-sized role in the crisis in Myanmar, cannot serve as the only determinant of geographic prioritisation. In order to consider other factors, this document will make use of the MIMU-HARP Vulnerability Index. The vulnerability index is comprised of 8 indicators, selected for their ability to predict the rest of the variables in the 2015 Census dataset. 
+
+The specific indicators chosen were: 
+
+* % of population without formal identification documents
+* % of population without a middle school education
+* % of females who were illiterate
+* % of households with bamboo or thatched roofs
+* % of households with safe sanitation
+* % of households with access to electricity
+* The child dependency ratio
+* The conflict index (reflecting battles, fatalities, violence against civilians and displacement)
+
+These indicators were combined to construct a township-level vulnerability index. Though these indicators were form 2015 and are outdated, they are still the most complete dataset on vulnerability in Myanmar. Going forward, the first seven components of the index will be extracted and treated separately as a shorthand for pre-existing multidimensional vulnerability in Myanmar. 
+
+However, the eighth component of the vulnerability index, first constructed in 2015 from ACLED data, can and has been updated with more recent data -- this was done in the previous section. This next few sections will examine the relationship between underdevelopment and the updated 2021 conflict score and the resulting implications on geographic prioritisation for the Food Security Cluster. 
+
+Perhaps the first thing to note is that, as can be seen from the scatter plot below, underdevelopment and pre-existing vulnerability are not good predictors of the current conflict. The points below, each one representing a township, split largely across two arcs -- with townships with high conflict scores largely being around the median for multidimensional vulnerability and townships with high multidimensional vulnerability tending to have low conflict scores.
 
 <br>
 
-```{r}
+```{r plotly-mdp-scatter}
+mdp_scatter <- fs_pin %>%  
+  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
+           violence_against_civilians) %>%
+  filter(conflict_score != 0) %>%
+  ggplot(aes(x = mdp_score, y = conflict_score, colour = conflict_score, 
+             text = paste0(township, ",", "\n",
+                           state, ",", "\n",
+                           "events: ", total_events, ",", "\n",
+                           "fatalities: ", fatalities, ",", "\n",
+                           "conflict_score: ", round(conflict_score, digits = 3), ",", "\n", 
+                           "md_vulnerability: ", percent(mdp_score, accuracy = 2), ",", "\n", 
+                           "partners_2021: ", partners_2021))) + 
+  geom_hline(aes(yintercept = median(conflict_score)), colour = "red", lty = 2) + 
+  geom_vline(aes(xintercept = median(mdp_score)), colour = "red", lty = 2) +
+  geom_point(aes(size = population_2021_proj), alpha = .7) +
+  scale_colour_viridis(option = "magma", direction = -1) + 
+  scale_x_continuous(labels = percent) +
+  labs(x = "Multidimensional vulnerability (2015)", y = "Conflict score (2021)", colour = "conflict\nscore", 
+       title = "Multidimensional vulnerability and conflict by township", 
+       subtitle = "Averages marked by red lines; population marked by size")
+
+ggplotly(mdp_scatter, tooltip = c("text"), width = 820, height = 550) %>% 
+  # layout(showlegend = FALSE, legend = list(font = list(size = 6))) %>% 
+  config(displayModeBar = FALSE) %>% 
+  layout(title = list(text = paste0("Multidimensional vulnerability and conflict by township",
+                                    "<br>",
+                                    "<sup>",
+                                    "Averages marked by red lines; population marked by size","</sup>")))
+
+
+
+
+```
+
+<br>
+
+This is a reflection of the conflict shift in away from frontier areas to cities and towns that have more strategic targets. The broader involvement of the Bamar majority in the conflict has likely also contributed to this shift -- prior to the February 2021 coup, the conflict was largely between Ethnic Armed Organisations and the Myanmar Armed Forces. However, combatants are now spread throughout the populations, especially with the proliferation of the People's Defence Forces. 
+
+It has been [observed](https://www.irrawaddy.com/news/burma/kachin-independence-army-pdfs-attack-myanmar-junta-bases-in-kachin-state.html) that Ethnic Armed Organisations, such as the Kachin Independence Army, are working closely with the People's Defence Forces, and are training and arming them. This has contributed to the front being moved further forward, outside of the areas that had been traditionally most affected by conflict.
+
+<br><br>
+
+### 2.4 2015 vulnerability bands
+
+This shift in conflict patterns can be further examined by considering the vulnerability bands developed by MIMU-HARP alongside its vulnerability index. In addition to an overall vulnerability score per township, 8 main typologies of vulnerability were also constructed to illustrate the wide variation of contexts and needs in the different parts of the country as well as to group together similar townships so that they may be considered as separate programming blocs. Please refer to the MIMU-HARP [Vulnerability Study](http://themimu.info/sites/themimu.info/files/documents/Report_Vulnerability_in_Myanmar_HARP-MIMU_Jun2018_ENG_Print_version.pdf) for more details. 
+
+According to MIMU-HARP, the result of this grouping is a "lens allowing the most vulnerable to be considered more methodically in policy and programme planning". By using these 8 typologies as a reference, it is possible to understand how the pattern of conflict has changed between 2015 and 2021. 
+
+<br>
+
+```{r table-bands-comparison}
+fs_pin %>%  
+  mutate(old_conflict_score = 1 - old_conflict_score, 
+         count = 1, 
+         above_conflict_mean = ifelse(conflict_env >= 0.1261084, 1, 0),
+         above_conflict_mean_old = ifelse(old_conflict_env >= 0.01504872, 1, 0)) %>%
+  group_by(band_text) %>% 
+  summarise(`2015_vulnerability` = mean(mdp_score),         
+            old_conflict_score = mean(old_conflict_env), 
+            conflict_score = mean(conflict_env),
+            tsp_count = n(),
+            tsp_above_mean_2015 = sum(above_conflict_mean_old == 1), 
+            tsp_above_mean_2021 = sum(above_conflict_mean == 1)) %>%
+  mutate(pc_above_mean_2015 = round(tsp_above_mean_2015 / tsp_count * 100, digits = 2), 
+         pc_above_mean_2021 = round(tsp_above_mean_2021 / tsp_count * 100, digits = 2)) %>% 
+  select(-tsp_above_mean_2015, -tsp_above_mean_2021) %>% 
+  mutate_at(vars(conflict_score, old_conflict_score, `2015_vulnerability`), ~ round(.x, digits = 3)) %>%
+  rename(vulnerability_band = band_text, 
+         `2015_score` = old_conflict_score, 
+         `2021_score` = conflict_score, 
+         `%_>avg_2015` = pc_above_mean_2015, 
+         `%_>avg_2021` = pc_above_mean_2021) %>% 
+  kable(caption = "Changes in conflict patterns between 2015 and 20221, by vulnerabilty band") %>% 
+  kable_classic_2("striped") %>% 
+  footnote("Data source: ACLED (accleddata.com) and MIMU; higher scores indicate more vulnerability/conflict", general_title = "") %>% 
+  add_header_above(c(" " = 2, "conflict score" = 2, "townships above avg conflict score" = 3))
+
+```
+
+<br>
+
+
+Conflict, once much more common in underdeveloped frontier areas in the operational areas of Ethnic Armed Organisations, is now much more pronounced in bands 3, 6 and 8, which contain major population centres and secondary cities and towns. Hubs in conflict-affected areas have the highest average 2021 conflict scores. 
+
+At the same time, the share of conflict at the township level has shifted away from bands 1 and 2 and is now much more dispersed across the country -- this is in line with dramatic increase in the geographic spread, magnitude and severity of conflict since 2015 (with annual fatalities and conflict events being more than 13 times higher). 
+
+Although conflict has persisted or even increased in many of the frontier and remote areas such as Laukkaing, Mongyai and Tangyan (all from band 1), the relative rankings of these areas have changed and they now form a much smaller share of unionwide conflict than they did in 2015. These townships tend to have much lower conflict scores in spite of their high vulnerability, indicating that whilst they remain development priorities, they should fall outside the caseload for humanitarian action. It is recommended that new vulnerability bands be developed, as they have proved very useful; but that is both outside the scope of this document and the capabilities of the Food Security Cluster.  
+
+<br><br>
+
+### 2.5 Clustering townships
+
+In recognition of the different contexts present in Myanmar (and the consequent need for different programming options), a simple K-means clustering was conducted on the townships to split them into prioritisation groups based on their 2021 conflict score, their 2015 vulnerability score and their population density. 
+
+This clustering separates all 330 townships into five groups. The plots below show the spread of townships by prioritisation group across the 2021 conflict score, 2015 vulnerability score and population density. 
+
+<br>
+
+```{r patchwork-clusters}
+
+reverselog_trans <- function(base = exp(1)) {
+    trans <- function(x) -log(x, base)
+    inv <- function(x) base^(-x)
+    trans_new(paste0("reverselog-", format(base)), trans, inv, 
+              log_breaks(base = base), 
+              domain = c(1e-100, Inf))
+}
+
+fs_pin %>%  
+  ggplot(aes(x = mdp_score, y = conflict_score)) + 
+  geom_point(aes(colour = cluster, size = population_2021_proj), alpha = .8) + 
+  guides(colour = "none", size = "none") +
+  labs(x = "Multidimensional vulnerability (2015)", y = "Conflict score (2021)") + 
+  scale_colour_viridis_d(option = "cividis") + 
+  
+fs_pin %>% 
+  ggplot(aes(x = population_density, y = conflict_score)) + 
+  geom_point(aes(colour = cluster, size = population_2021_proj), alpha = .8) + 
+  scale_x_continuous(trans = reverselog_trans(10), breaks = c(0, 1, 10, 100, 1000, 10000), 
+                     labels = comma_format(accuracy = 1)) + 
+  scale_size_continuous(labels = comma) + 
+  labs(size = "population", 
+       x = "Persons per km2 (reversed)", y = "Conflict score (2021)") + 
+  scale_colour_viridis_d(option = "cividis") + 
+
+  plot_layout(widths = 1) + 
+  plot_annotation(title = "Comparison between vulnerability, population density and conflict score", 
+                  caption = "Data source: ACLED (acleddata.com) and MIMU", 
+                  theme = theme(plot.caption = element_text(hjust = .5)))
+
+
+```
+
+<br>
+
+It can be seen that groups A1 and A2, which have the highest conflict scores, are quite distinct from group D (where the majority of the development caseload resides). Group C has neither high vulnerability nor high conflict incidence. And group B consists of solely urban centres. The table below provides more detail on each of the groups.  
+
+<br> 
+
+```{r table-group-summaries}
+fs_pin %>%  
+  replace_na(list(fatalities = 0)) %>% 
+  group_by(group = cluster) %>% 
+  summarise(conflict_score_2021 = mean(conflict_score),
+            fatalities = sum(fatalities), 
+            vulnerability_2015 = mean(mdp_score), 
+            ppl_km2 = round(mean(population_density), digits = 0), 
+            population = sum(population_2021_proj), 
+            townships = n()) %>% 
+  mutate(`%_total_population` = round(population / sum(population) * 100, digits = 2),
+         `%_fatalities_2021` = round(fatalities / sum(fatalities) * 100, digits = 2)) %>% 
+  select(group, conflict_score_2021, `%_fatalities_2021`, vulnerability_2015, ppl_km2, 
+         townships, `%_total_population`) %>% 
+  mutate_at(vars(conflict_score_2021, vulnerability_2015), ~round(.x, digits = 3)) %>% 
+  kable(caption = "Summary statistics by prioritisation group", format.args = list(big.mark = ",")) %>% 
+  kable_classic_2("striped") %>% 
+  footnote(footnote_as_chunk = TRUE, threeparttable = TRUE, 
+           general = "Groups A1 and A2 have the highest conflict scores and should be prioritised over the others. Higher scores indicate more vulnerability/conflict.", general_title = "") 
+
+# %>%
+#  save_kable(file = "summary_stats_groups.png", zoom = 2)
+```
+<br>
+
+Groups A1 and A2 both have middling vulnerability scores, but have much higher average conflict scores. Group A1, in particular, has a very high concentration of conflict incidents and fatalities, in addition to having the second-highest vulnerability scores of the groups. These 58 townships (containing about 23% of the population) are clear priorities for humanitarian action. 
+
+It should also be noted that their average vulnerability scores are both higher than group C, which, to recall, has below average conflict scores and vulnerability scores and should not be prioritised by either development aid or humanitarian action. Group D, as touched on before, is comprised of very vulnerable townships that have been much less affected by the conflict, and therefore should not be prioritised by humanitarian actors. 
+
+<br>
+
+```{r plotly-group-scatter}
+group_scatter <- fs_pin %>%  
+  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
+           violence_against_civilians) %>%
+  filter(conflict_score != 0) %>%
+  ggplot(aes(x = mdp_score, y = conflict_score, colour = cluster, 
+             text = paste0(township, ", ", state, "\n",
+                           "group: ", cluster, "\n",
+                           "fatalities: ", fatalities, "\n",
+                           "conflict_score: ", round(conflict_score, digits = 3), "\n", 
+                           "vul_score: ", round(mdp_score, digits = 3), "\n", 
+                           "population: ", round(population_2021_proj, digits = 0), "\n", 
+                           "partners_2021: ", partners_2021))) + 
+  geom_hline(aes(yintercept = median(conflict_score)), colour = "red", lty = 2) + 
+  geom_vline(aes(xintercept = median(mdp_score)), colour = "red", lty = 2) +
+  geom_point(aes(size = population_2021_proj), alpha = .7) +
+  scale_colour_viridis_d(option = "cividis") + 
+  labs(x = "Multidimensional vulnerability (2015)", y = "Conflict score (2021)", 
+       colour = "group", size = "", 
+       title = "Multidimensional vulnerability and conflict by township", 
+       subtitle = "Averages marked by red lines; population marked by size")
+
+ggplotly(group_scatter, tooltip = c("text"), width = 820, height = 550) %>% 
+  # layout(showlegend = FALSE, legend = list(font = list(size = 6))) %>% 
+  config(displayModeBar = FALSE) %>% 
+  layout(title = list(text = paste0("Multidimensional vulnerability and conflict by prioritisation group",
+                                    "<br>",
+                                    "<sup>",
+                                    "Averages marked by red lines; population marked by size","</sup>")))
+
+
+```
+
+
+<br><br>
+
+### 2.6 Linking geographic prioritisation and beneficiary selection 
+
+Using the classifications from the decision tree in section 1.3, we can see that in rural areas, the highest proportions of people who are in the priority group are those who have been affected by conflict, followed by those who were affected by conflict and have lost work or employment opportunities. Rural areas severely-affected by conflict (the townships in groups A1 and part of A2) are the areas in which we may reach populations with the highest proportions of households in the priority group.
+
+<br>
+
+```{r table-priority-hhds-more}
 survey %>% 
   mutate(priority_adj = priority * combined_wt) %>% 
   group_by(rural, shocks_conflict, shocks_lostwork) %>% 
@@ -1269,15 +1527,17 @@ survey %>%
 
 ```
 
+
+
 <br> 
 
-In urban areas, however, conflict incidence is not as important of a determining factor -- the best results can be achieved by targeting people who have lost work or employment opportunities, irrespective of whether or not they have been affected by conflict.  
+In urban areas (group B and part of A2), however, conflict incidence is not as important of a determining factor -- the best results can be achieved by targeting people who have lost work or employment opportunities, irrespective of whether or not they have been affected by conflict.  
 
 The table below shows the characteristics of the population groups that have the lowest concentrations of priority households.  
 
 <br>
 
-```{r}
+```{r table-priority-hhds-less}
 survey %>% 
   mutate(priority_adj = priority * combined_wt) %>% 
   group_by(rural, shocks_conflict, shocks_lostwork) %>% 
@@ -1317,7 +1577,7 @@ acled %>%
             locations = n_distinct(interaction(admin3, location)), .groups = "drop") %>%
   mutate(`%_events` = round(events / sum(events) * 100, digits = 2), 
          `%_fatalities` = round(fatalities / sum(fatalities) * 100, digits = 2)) %>% 
-  select(has_village, events, `%_events`, fatalities, `%_fatalities`, locations) %>% 
+  select(mentions_vilage = has_village, events, `%_events`, fatalities, `%_fatalities`, locations) %>% 
   kable(caption = "Conflict events with and without villages", format.args = list(big.mark = ","), 
         table.attr = "style = 'width:60%;'") %>% 
   kable_classic_2() %>% 
@@ -1328,7 +1588,7 @@ acled %>%
 
 <br>
 
-Below is an interactive reference table of the 1,907 villages identified in the ACLED dataset, complete with coordinates. While this list does provide an excellent start, by working in these areas, partners should also endeavour to identify the spefici locations of the remaining 62% of conflict events. 
+Below is an interactive reference table of the 1,907 villages identified in the ACLED dataset, complete with coordinates. While this list does provide an excellent start, by working in these areas, partners should also endeavour to identify the specific locations of the remaining 62% of conflict events. 
 
 <br>
 
@@ -1336,7 +1596,7 @@ Below is an interactive reference table of the 1,907 villages identified in the 
 acled %>%
   mutate(has_village = fct_relevel(has_village, c("yes", "no"))) %>%
   filter(year == 2021 & sub_event_type != "Peaceful protest" & has_village == "yes") %>%
-  group_by(admin1, admin3, village = location) %>% 
+  group_by(state = admin1, township = admin3, village = location) %>% 
   mutate(event_count = 1) %>% 
   summarise(events = n(), 
             fatalities = sum(fatalities), 
@@ -1344,10 +1604,13 @@ acled %>%
             remote_violence = sum(event_count[event_type == "Explosions/Remote violence"]), 
             violence_against_civilians = sum(event_count[event_type == "Violence against civilians"]),
             latitude = max(latitude),
-            longitude = max(longitude)) %>% 
+            longitude = max(longitude)) %>%
   arrange(desc(fatalities)) %>% 
   datatable(filter = list(position = "top", clear = FALSE), 
-            options = list(pageLength = 10, scrollX = TRUE), 
+            options = list(pageLength = 10, scrollX = TRUE, 
+                           headerCallback = DT::JS("function(thead) {", 
+                          "  $(thead).css('font-size', '.8em');",
+                          "}")), 
             caption = htmltools::tags$caption(style = 'caption-side: top;
                                               text-align: center;
                                               color: black; font-size: 120%;',
@@ -1359,7 +1622,7 @@ acled %>%
 
 <br><br>
 
-### 2.4 5W results from the first quarter of 2022
+### 2.7 5W results from the first quarter of 2022
 
 In the first quarter of 2022, Food Security Cluster partners have reached a total of `r sum(fsc$new_beneficiaries) %>% format(big.mark = ",")` persons or `r round(sum(fsc$new_beneficiaries) / sum(fs_pin$fs_targeted) * 100, digits = 2)`% of the 2022 target. Below is an examination of the extent to which partners have targeted the townships most affected by conflict. 
 
@@ -1374,28 +1637,33 @@ ben_target <- fsc %>%
   group_by(admin3_pcode_old) %>% 
   summarise(beneficiaries = sum(new_beneficiaries),
             partners = n_distinct(org_code)) %>% 
-  right_join(fs_pin, by = c("admin3_pcode_old" = "admin3_pcode")) %>% 
+  right_join(fs_pin %>% 
+               rename(beneficiaries_2022 = beneficiaries), 
+             by = c("admin3_pcode_old" = "admin3_pcode")) %>% 
   replace_na(list(beneficiaries = 0)) %>% 
   mutate(reached_pc = beneficiaries / fs_targeted,
          reached_pc = ifelse(is.infinite(reached_pc), 1, reached_pc),
          fs_targeted = ifelse(fs_targeted == 0 & beneficiaries > 0, 1, fs_targeted),
          fs_targeted = round(fs_targeted, digits = 0)) %>% 
   arrange(desc(reached_pc)) %>% 
-  select(state, township, fs_pin, fs_targeted, beneficiaries, reached_pc, partners, group) %>%
-  ggplot(aes(x = fs_targeted, y = beneficiaries, colour = group, 
+  select(state, township, fs_pin, fs_targeted, beneficiaries, reached_pc, partners, cluster) %>%
+  mutate(pc_target = round(beneficiaries / fs_targeted * 100, digits = 2)) %>% 
+  ggplot(aes(x = fs_targeted, y = beneficiaries, colour = cluster, 
              text = paste0(township, ",", "\n",
                            state, ",", "\n",
                            "beneficiaries_2022: ", beneficiaries, "\n",
                            "target_2022: ", fs_targeted, "\n",
+                           "%_reached: ", pc_target, "\n", 
                            "partners_2022: ", partners, "\n",
-                           "group: ", group))) + 
+                           "group: ", cluster))) + 
   geom_abline(intercept = 0, slope = 1, lty = 2, colour = "red") + 
   geom_point(aes(size = beneficiaries), alpha = 0.8) +
   scale_size_continuous(guide = "none") + 
   scale_x_continuous(trans = "log10", labels = comma) + 
   scale_y_continuous(trans = "log10", labels = comma) +
-  scale_colour_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
-  labs(y = "Beneficiaries", x = "Targeted population", 
+  scale_colour_viridis_d(option = "cividis") +
+  # scale_colour_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
+  labs(y = "Beneficiaries", x = "Targeted population", colour = "Group", 
        title = "Targeted population per township vs beneficiaries reached in Q1 2022, by prioritisation group",
        subtitle = "The red line is 100% of target")
 
@@ -1405,50 +1673,55 @@ ggplotly(ben_target, tooltip = c("text"), width = 820) %>%
                         paste0("Targeted population per township vs beneficiaries reached in Q1 2022",
                                     "<br>",
                                     "<sup>",
-                                    "By prioritisation group; the red line is 100% of target","</sup>")))
+                                    "By prioritisation group; the red line is 100% of target; size is beneficiaries reached","</sup>")))
 ```
 
 <br>
 
-With reference to the table below, 71% of beneficiaries in Q1 2022 came from group A1 and 12% came from group A2. Whilst on the surface, this seems like partners have made an effort to reached conflict-affected townships, this has largely been due to oversubscription in 3 townships from Yangon and in Sittwe. The number of beneficiaries reached in these areas are more than 250% of their collective target. Without reaching 17 out of the 22 townships in group A1, the number of beneficiaries already exceeds the total or the entire group. 
+With reference to the table below, 1.7% of beneficiaries came from group A1 and 48% of beneficiaries came from group A2. Whilst on the surface, this seems like partners have made effort to reach conflict-affected townships (in at least group A2). However, this reach has largely been due to oversubscription in two areas -- Hlaingtharya and Sittwe. The number of beneficiaries reached in Hlaingtharya exceeds the cluster target by 250% as well as the actual population of that township. 
 
-Whilst a broader range of townships in group A2 (high conflict score, low population density; where the highest concentrations of households in the priority group can be found) has been reached, the number of persons reached per townships remains far below what has been allocated to group A1. It is hoped that partners will be able to afford group A2 much higher coverage as the year progresses. 
+The development of the prioritisation groups also brings up the broader point of whether or not cluster targets are in line with needs and if they should be reformulated based on the information now available. Nevertheless, it is hoped that partners will be able to afford townships in groups A1 and A2 greater coverage as the year progresses. 
+
+<br>
 
 ```{r table-reached-group}
 fsc %>% 
   group_by(admin3_pcode_old) %>% 
   summarise(beneficiaries = sum(new_beneficiaries),
             partners = n_distinct(org_code)) %>% 
-  right_join(fs_pin, by = c("admin3_pcode_old" = "admin3_pcode")) %>% 
+  right_join(fs_pin %>%  select(-beneficiaries), by = c("admin3_pcode_old" = "admin3_pcode")) %>% 
   replace_na(list(beneficiaries = 0)) %>%
   mutate(gap = ifelse(fs_targeted - beneficiaries <= 0, 0, fs_targeted - beneficiaries),
          reached_pc = 1 - gap / fs_targeted, 
          fs_targeted = ifelse(fs_targeted == 0 & beneficiaries > 0, 1, fs_targeted),
          has_beneficiaries = ifelse(beneficiaries > 0, 1, 0)) %>% 
-  group_by(group) %>% 
+  group_by(cluster) %>% 
   summarise(beneficiaries = sum(beneficiaries, na.rm = TRUE), 
             fs_targeted = sum(fs_targeted, na.rm = TRUE), 
             gap = sum(gap, na.rm = TRUE), 
             tsp_reached = sum(has_beneficiaries), 
             tsp_total = n()) %>% 
-  mutate(pc_gap = round(gap / fs_targeted * 100, digits = 2)) %>% 
+  mutate(pc_gap = round(gap / fs_targeted * 100, digits = 2), 
+         pc_ben = round(beneficiaries / sum(beneficiaries) * 100, digits = 2)) %>% 
   mutate_at(vars(fs_targeted, gap), ~ round(.)) %>% 
-  select(group, beneficiaries, target = fs_targeted, gap, `%_gap` = pc_gap, tsp_reached, tsp_total) %>% 
+  select(group = cluster, beneficiaries, `%_ben` = pc_ben, target = fs_targeted, 
+         gap, `%_gap` = pc_gap, tsp_reached, tsp_total) %>% 
   kable(caption = "2022 Q1 beneficiaries and percent reached by prioritisation group", 
         format.args = list(big.mark = ",")) %>% 
   kable_classic_2("striped") %>% 
-  footnote("Any reach above 100% is counted as 100%;\n exceeding the target in one township does not affect other townships", 
+  footnote("Any reach above 100% is counted as 100%; exceeding the target in one township does not affect other townships", 
            general_title = "")
 
 ```
 
 <br>
 
-Overall, the results from the first quarter of 2022 paint a mixed picture, with many townships in group A2 being reached but the population that has been reached still being skewed towards relatively few areas. Notably, only 3,450 beneficiaries have been reached in the whole of Sagaing, where the fighting has been heaviest. Furthermore, more beneficiaries were reached in group B2 (low conflict scores and low population density) than in group A2. It is recommended that targets and plans for the Food Security Cluster be reviewed, and partners be reminded to reallocate resources away from oversubscribed areas.
+
+Overall, the results from the first quarter of 2022 paint a mixed picture, with achievements in group A1 and A2 being skewed towards relatively few areas, with many townships in group A2 being reached but the population that has been reached still being skewed towards relatively few areas. Notably, only `r filter(fsc, state == "Sagaing") %>% {sum(.$new_beneficiaries)} %>% format(big.mark = ",")` beneficiaries being reached in the whole of Sagaing, where the fighting has been heaviest. It is recommended that targets and plans for the Food Security Cluster be reviewed, and partners be reminded to reallocate resources away from oversubscribed areas and away from group C, which are neither humanitarian nor development priorities.
 
 <br><br>
 
-### 2.5 Maps of conflict scores and prioritisation group
+### 2.8 Maps of conflict scores and prioritisation group
 
 ```{r map-conflict-score, fig.height=9}
 
@@ -1470,13 +1743,13 @@ fs_pin %>%
   left_join(pcode3_shape, by = "admin3_pcode") %>% 
   st_as_sf() %>% 
   ggplot() + 
-  geom_sf(aes(fill = group), size = 0.1, colour = "gray20") + 
+  geom_sf(aes(fill = cluster), size = 0.1, colour = "gray20") + 
   geom_sf(data = pcode1_shape, alpha = 0, colour = "black", size = 0.5) +
-  scale_fill_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
-  # scale_fill_viridis_d(end = 0.9, option = "cividis") +
+  # scale_fill_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
+  scale_fill_viridis_d(option = "cividis") +
   theme_void() +
   labs(title = "Townships by prioritisation group", 
-       fill = "priori-\ntisation\ngroup",
+       fill = "Priori-\ntisation\ngroup",
        caption = "Data source: ACLED; acleddata.com and FSC calculations") +
   theme(plot.caption=element_text(hjust = 0.5), 
         plot.background = element_rect(fill = "white", colour = NA))  
@@ -1486,31 +1759,36 @@ fs_pin %>%
 
 <br><br>
 
-### 2.6 Reference table for conflict variables
+### 2.9 Reference table for conflict variables
 
 Below is an interactive reference table for the various types of conflict events by township. It also includes the overall conflict score and prioritisation groups. The search bar can be used to find specific townships, or any of the columns may be sorted according to ascending or descending values. The table currently shows townships in descending order of conflict score. 
 
 <br>
 
-```{r}
+```{r dt-reference-table}
 fs_pin %>% 
   select(state, township, pop_2021 = population_2021_proj, ppl_km2 = population_density, 
          PIN = fs_pin, target = fs_targeted,
-         group, conflict_score, fatalities,
+         group = cluster, vulnerability = mdp_score, conflict_score, fatalities,
          battles, explosions_remote_violence, protests_and_riots, strategic_developments, violence_against_civilians,
          admin3_pcode) %>% 
   arrange(desc(conflict_score)) %>% 
   datatable(filter = list(position = "top", clear = FALSE),
-            options = list(pageLength = 10, scrollX = TRUE),
+            options = list(pageLength = 10, scrollX = TRUE, 
+                           headerCallback = DT::JS("function(thead) {", 
+                          "  $(thead).css('font-size', '.8em');",
+                          "}")),
             caption = htmltools::tags$caption(style = "caption-side: top;
                                               text-align: center; font-size: 140%;",
                                               "2021 conflict indicators by township")) %>% 
   formatRound(c("pop_2021", "ppl_km2", "target", "PIN"), digits = 0) %>% 
-  formatRound(c("conflict_score"), digits = 2)
+  formatRound(c("conflict_score", "vulnerability"), digits = 2) %>% 
+  formatStyle(0, target = "row", lineHeight = "80%", fontSize = "80%")
  
 ```
 
 <br><br><br>
+
 
 ## 3. Distribution of flood risk in Myanmar
 
@@ -1682,9 +1960,9 @@ food_insecurity_score <- survey %>%
 
 ### 4.3 Limited performance of linear regression models
 
-Prior to the development of the decision tree detailed in section 1.3, a linear regression model had been considered. However, no matter how sophisticated the method, the highest r-squared achieved was 0.136 (a model with an r-squared with 1 would mean it was perfectly predictive and an r-squared of 0 means that a model does not predict any of the variance at all; in this case, the best linear regression model still left 86% of the variance unexplained). 
+Prior to the development of the decision trees detailed in section 1.3, a linear regression model had been considered. However, no matter how sophisticated the method, the highest r-squared achieved was 0.136 (a model with an r-squared with 1 would mean it was perfectly predictive and an r-squared of 0 means that a model does not predict any of the variance at all; in this case, the best linear regression model still left 86% of the variance unexplained). 
 
-With reference to the plot below of predicted values of the food security score vs the actual values (of the best performing model), whilst there is a significant relationship, its predictive performance is too weak. This was why a decision tree was employed instead of a linear model. Each point in the plot below is a household in the survey. 
+With reference to the plot below of predicted values of the food security score vs the actual values (of the best performing model), whilst there is a significant relationship, its predictive performance is too weak. This was why decision trees were employed instead of a linear model. Each point in the plot below is a household in the survey. 
 
 <br>
 
@@ -1741,12 +2019,17 @@ ols %>%
 As a  point of reference, below is the code for the decision tree. 
 
 ```{r eval = FALSE, echo = TRUE}
-decision_tree <- survey %>% 
+tree_environment_circumstances <- survey %>% 
   rpart(priority ~  shocks_lostwork + shocks_sicknessdeath + shocks_foodprices + 
           shocks_conflict + shocks_cantworkbusiness + shocks_naturalhazard + 
           shocks_accessmarket + shocks_pricesother + shocks_other + 
-          hoh_female + rural + not_improved_sanitation,
+          rural + not_improved_sanitation,
         data = .,  weights = combined_wt , cp = 0.01)
+
+tree_demographics <- survey %>% 
+  mutate(children_0_4 = ifelse(children_0_4 > 0, 1, 0)) %>% 
+  rpart(priority ~ children_0_4 + hoh_female + hoh_education + hoh_age, 
+        data = ., weights = combined_wt, cp = .0088)
 ```
 
 <br><br>
@@ -1819,69 +2102,9 @@ index_shares2 <- conflict_df2 %>%
   mdepriv(c("battles", "explosions_remote_violence", 
             "violence_against_civilians", "fatalities", 
             "strategic_developments", "protests_and_riots", "total_idps"),
+          # IDP counts have been used in the score, but will not be read 
+          # into this report
           method = "bv", output = "all")
-
-# this is the dataset that has been read into this report
-conflict_score2 <- conflict_df2 %>%
-  left_join(index_shares2$data %>% 
-              select(admin3_pcode, 
-                     score_i, # this is the conflict_score
-                     index_battles = battles, 
-                     index_explosions_remote_violence = explosions_remote_violence,
-                     index_violence_against_civilians = violence_against_civilians, 
-                     index_fatalities = fatalities, 
-                     index_strategic_developments = strategic_developments, 
-                     index_protests_and_riots = protests_and_riots), 
-            by = "admin3_pcode") %>% 
-  # IDP counts not selected for inclusion in this dataframe
-  left_join(acled %>% 
-              distinct(admin1, admin3, admin3_pcode), 
-            by = "admin3_pcode") %>%
-  left_join(conflict_score %>% select(old_conflict_score = score_i, admin3_pcode), 
-            by = "admin3_pcode")
-```
-
-# vulnerability score
-
-```{r}
-# i think this works our pretty well 
-vul_share <- vulmmr %>% select(avg_safe_sanitation_improved_drinking_water:female_literacy_percent_literate, 
-                  child_dependency_ratio_31, unpaid_family_worker_percent,
-                  admin3_pcode = township_pcode) %>% 
-  left_join(conflict_score %>% select(conflict_score = score_i, admin3_pcode), by = "admin3_pcode") %>% 
-  select(-conflict_index_c_percent_of_max_inverse_percent_of_average_of_envelopes_12, 
-         -unpaid_family_workers_inverse, -child_dependency_ratio_inverse) %>% 
-  mutate_at(vars(avg_safe_sanitation_improved_drinking_water:female_literacy_percent_literate), ~ 1 - .x) %>% 
-  filter(!is.na(admin3_pcode)) %>%  
-  replace(is.na(.), 0) %>% 
-  mdepriv(c("avg_safe_sanitation_improved_drinking_water", "average_good_roof_and_wall", 
-            "highest_education_at_least_middle_school_percent_14", "electricity_for_lighting_percent_15", 
-            "id_card_with_id_total_percent_16", "female_literacy_percent_literate", 
-            "child_dependency_ratio_31", "unpaid_family_worker_percent", "conflict_score"), 
-          method = "cz", output = "all", 
-          score_i_heading = "vul_score")
-  
-  
-glimpse(vul_share)
-vul_share$summary_by_item
-
-vulmmr %>% 
-  select(avg_safe_sanitation_improved_drinking_water:female_literacy_percent_literate,
-         child_dependency_ratio_31, unpaid_family_worker_percent,
-         admin3_pcode = township_pcode) %>% 
-  left_join(conflict_score %>% select(conflict_score = score_i, admin3_pcode), by = "admin3_pcode") %>% 
-  select(-conflict_index_c_percent_of_max_inverse_percent_of_average_of_envelopes_12, 
-         -unpaid_family_workers_inverse, -child_dependency_ratio_inverse) %>% 
-  relocate(admin3_pcode, .after = conflict_score) %>% 
-  filter(!is.na(admin3_pcode)) %>% 
-  mutate_at(vars(avg_safe_sanitation_improved_drinking_water:female_literacy_percent_literate), ~ 1 - .x) %>% 
-  replace(is.na(.), 0) %>% 
-  rowwise() %>% 
-  mutate(vul_score_flat = mean(c(avg_safe_sanitation_improved_drinking_water:conflict_score))) %>% 
-  left_join(vul_share$data %>% select(admin3_pcode, vul_score), by = "admin3_pcode") %>% 
-  ggplot(aes(x = vul_score_flat, y = vul_score)) + 
-  geom_point()
-  
 
 ```
 

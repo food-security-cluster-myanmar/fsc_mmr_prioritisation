@@ -1,0 +1,111 @@
+---
+title: "Untitled"
+output: html_document
+date: '2022-05-30'
+---
+
+
+
+<br>
+
+```{r}
+fs_pin %>%  
+  mutate(old_conflict_score = 1 - old_conflict_score, 
+         count = 1, 
+         above_conflict_mean = ifelse(conflict_env >= 0.1261084, 1, 0),
+         above_conflict_mean_old = ifelse(old_conflict_env >= 0.01504872, 1, 0)) %>%
+  group_by(band_text) %>% 
+  summarise(vulnerability = mean(mdp_score),         
+            old_conflict_score = mean(old_conflict_env), 
+            conflict_score = mean(conflict_env),
+            tsp_count = n(),
+            tsp_above_mean_2015 = sum(above_conflict_mean_old == 1), 
+            tsp_above_mean_2021 = sum(above_conflict_mean == 1)) %>%
+  mutate(pc_above_mean_2015 = round(tsp_above_mean_2015 / tsp_count * 100, digits = 2), 
+         pc_above_mean_2021 = round(tsp_above_mean_2021 / tsp_count * 100, digits = 2)) %>% 
+  select(-tsp_above_mean_2015, -tsp_above_mean_2021) %>% 
+  mutate_at(vars(conflict_score, old_conflict_score, vulnerability), ~ round(.x, digits = 3)) %>%
+  rename(vulnerability_band = band_text, 
+         `2015_score` = old_conflict_score, 
+         `2021_score` = conflict_score, 
+         `%_ >avg_2015` = pc_above_mean_2015, 
+         `%_>avg_2021` = pc_above_mean_2021) %>% 
+  kable(caption = "Changes in conflict patterns between 2015 and 2022, by vulnerabilty band") %>% 
+  kable_classic_2("striped") %>% 
+  footnote("Data source: ACLED (accleddata.com) and MIMU", general_title = "") %>% 
+  add_header_above(c(" " = 2, "conflict score" = 2, "townships above avg conflict score" = 3))
+
+```
+
+<br>
+
+The share of conflict at the township level has shifted away from bands 1 and 2 and is now more dispersed across the country -- this is in line with the dramatic increase in the magnitude and severity of conflict since 2015 (with both fatalities and conflict events being more than 10 times higher). 
+
+And though conflict has persisted or even increased in many of the frontier and remote areas such as Laukkaing, Mongyai and Tangyan,, the relative rankings of these areas has changes and they now form a much smaller share of the conflict than they did in 2015. These townships now sit within group B2 (below average conflict scores and low populations densities) and remain development priorities but are outside of the caseload for humanitarian action. 
+
+This means that conflict, once much more common in underdeveloped frontier areas in the operational areas of Ethnic Armed Organisations, is now much more pronounced in bands 3, 6 and 8 which all contain major population centres. Though it should be mentioned that the the hubs in conflict-affected areas have the highest average conflict scores. 
+
+New vulnerability bands will need to be developed as the grouping has been very useful for targeted programming. But that is outside the scope of this document. 
+
+As can be seen in the interactive scatterplot below, underdevelopment and pre-existing vulnerability is not a good predictor of current conflict. The points below, each one representing a township split largely amongst two arcs -- with townships with high conflict scores largely being below the median for multidimensional poverty. Likewise, most townships with high multidimensional poverty tend to have low conflict scores. 
+
+
+
+
+
+
+### clustering 
+
+
+
+
+
+
+
+## 2. Let's take a look at the vulnerability score 
+
+The original MIMU-HARP Vulnerability Index was comprised of 8 indicators, selected for their ability to predict the rest of variables in the 2015 Census dataset. For additional details, reading the MIMU-HARP Report on Vulnerability in Myanmar is highly encouraged. 
+
+The specific indicators chosen were: 
+
+* % of population without formal identification documents
+* % of population without a middle school education
+* % of females who were illiterate
+* % of households with bamboo or thatched roofs
+* % of households with safe sanitation
+* % of households with access to electricity
+* The child dependency ratio of a given area
+* The conflict index (reflecting battles, fatalities, violence against civilians and displacement)
+
+These indicators were combined to construct a township-level vulnerability index. Whilst these indicators, with one notable exception, were from the 2015 census and therefore outdated, they still represented the most complete dataset on vulnerability in Myanmar. The conflict index, which the earlier sections have worked on updating was built out of ACLED data, which is publicly available and regularly updated. 
+
+This next section will examine the relationship between underdevelopment and the updated conflict score and its implications on geographic prioritisation for the Food Security Cluster. 
+ 
+
+<br><br>
+
+Maybe let's save the ridges for later
+
+### Let's compare the conflict score with underdevelopment
+
+```{r ridge-plot}
+
+fs_pin %>% 
+  mutate(group = fct_rev(group)) %>% 
+  ggplot(aes(x = mdp_score, y = group, fill = group)) + 
+  geom_density_ridges2(rel_min_height = .01) +
+  scale_fill_manual(values = c("#FFEA46FF", "#C4B56CFF", "#00204DFF", "#575C6DFF")) + 
+  guides(fill = guide_legend(reverse = TRUE)) + 
+  labs(x = "Vulnerability score (underdevelopment)", y = "Conflict prioritisation group", 
+       title = "Distribution of mulitdimensional vulnerability across prioritisation groups", 
+       subtitle = "Higher scores indicate more vulnerability", 
+       fill = "")
+```
+
+<br>
+
+From the plot above, which shows the distribution of vulnerability scores of the townships in each prioritisation group, it can be seen that groups A1 and B1 have fairly similar ranges when it comes to underdevelopment, with the majority of the townships within them being very close to the inferior end of the scale. This makes sense as the townships in both groups are fairly urbanised. 
+
+Whilst group B2 has the highest average vulnerability scores, their low conflict scores makes them not a priority for humanitarian intervention. Instead, they should be priorities in development work. The distribution of vulnerability scores in group A2, which has the highest overall conflict scores, further highlights how underdevelopment and conflict in 2021 do not coincide. 
+
+<br><br>
