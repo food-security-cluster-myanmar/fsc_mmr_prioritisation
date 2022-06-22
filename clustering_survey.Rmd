@@ -1,0 +1,1226 @@
+---
+title: "Untitled"
+output: html_document
+date: '2022-06-14'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 10)
+library(tidyverse)
+library(tidymodels)
+library(factoextra)
+library(dendextend)
+library(corrplot)
+library(viridis)
+library(patchwork)
+library(DT)
+library(pander)
+library(vip)
+library(patchwork)
+library(janitor)
+
+# scaling functions 
+range01 <- function(x){(x-min(x))/(max(x)-min(x))}
+range_wna <- function(x){(x-min(x, na.rm = TRUE))/(max(x, na.rm = TRUE)-min(x, na.rm = TRUE))}
+
+theme_set(theme_minimal())
+
+# pander tables all in one row
+panderOptions('table.split.table', Inf)
+
+# disabling scientific notation
+options(scipen = 999)
+```
+
+## Datasets 
+
+Housing types not relevant -- More than 3200 of the responses were apartment or condo. 
+
+### Survey
+
+```{r}
+survey <- read_csv("./data/survey3.csv")
+
+set.seed(456)
+```
+
+```{r}
+survey_debt <- survey %>% 
+  left_join(tribble(
+    ~hh_debt_borrow_why, ~debt_borrow_why_short, ~debt_borrow_why_text,
+    1, "why_buy_food", "x67_To buy food",
+    2, "why_buy nfis",  "x67_To buy non-food items",
+    3, "why_accomodation",  "x67_To pay for rent or an accomodation",
+    4, "why_education",  "x67_To pay school/education costs",
+    5, "why_health", "x67_To cover health expenses",
+    6, "why_other", "x67_To pay for durable goods",
+    7, "why_other", "x67_To pay for ceremonies/social events",
+    8, "why_other", "x67_To buy an apartment/house",
+    9, "why_other", "x67_To pay ticket/cover travel for migration",
+    10,"why_ag_input", "x67_To buy agricultural land/inputs or livestock",
+    11, "why_invest_business", "x67_To invest in business",
+    12, "why_other","x67_To pay back another loan",
+    13, "why_other","x67_Other",
+    14, "why_other", "x67_DON'T KNOW",
+    15, "why_other", "x67_REFUSED"
+  ), by = "hh_debt_borrow_why") %>% 
+  mutate(count = ifelse(!is.na(debt_borrow_why_short), 1, 0)) %>% 
+  pivot_wider(names_from = debt_borrow_why_short, values_from = count, values_fill = 0) %>%
+  clean_names() %>% 
+  left_join(tribble(~hh_debt_borrow_from, ~debt_borrow_from_short, ~debt_borrow_from_text,
+                    1, "from_relatives", "x66_Relatives",
+                    2, "from_other", "x66_Relatives living outside the country",
+                    3, "from_other", "x66_Traders/shopkeepers",
+                    4, "from_bank_credit", "x66_Bank/Credit institution/Government/Micro-credit project",
+                    5, "from_money_lender", "x66_Money lender",
+                    6, "from_other", "x66_Landlord [more than 1 month behind in rent]",
+                    7, "from_other", "x66_Informal savings group",
+                    8, "from_other", "x66_Employer",
+                    9, "from_other", "x66_Other"), 
+            by = "hh_debt_borrow_from") %>% 
+  mutate(count = ifelse(!is.na(debt_borrow_from_short), 1, 0)) %>% 
+  pivot_wider(names_from = debt_borrow_from_short, values_from = count, values_fill = 0) %>% 
+  clean_names() %>% 
+  select(matches("why_|from_"), survey_id, -matches("migration"), 
+         -debt_borrow_why_text, -debt_borrow_from_text)
+
+
+```
+
+### Mini
+```{r}
+
+survey_mini <- survey %>%
+  mutate(
+    edu_higher = ifelse(hoh_education == "edu_higher", 1, 0),
+    edu_low = ifelse(hoh_education %in% c ("edu_none", "edu_primary"), 1, 0),
+    edu_primary = ifelse(hoh_education == "edu_primary", 1, 0),
+    edu_secondary = ifelse(hoh_education == "edu_secondary", 1, 0),
+    # edu_religious = ifelse(hoh_education ==  "edu_religious", 1, 0), 
+    hh_debt = case_when(hh_debt_borrow_from %in% c(1, 2) ~ 0, 
+                        hh_debt_borrow_from %in% c(3, 4, 5, 6, 7, 8, 9) ~ 1, 
+                        TRUE ~ 0)) %>%
+  select(
+    shocks_conflict,
+    shocks_lostwork,  
+    shocks_foodprices, 
+    shocks_cantworkbusiness,
+    shocks_accessmarket, 
+    no_accessmarket,
+    edu_higher,
+    edu_secondary,
+    edu_primary,
+    edu_low,
+    # income_ms_no_income,
+    # income_ms_casual_non_ag,
+    # income_ms_stable_non_ag,
+    # income_ms_agriculture,
+    rural,
+    children_0_4,
+    hoh_female,
+    fies_ateless, fies_fewfoods, fies_healthy, fies_hungry,
+    fies_worried, fies_ranout, fies_whlday, fies_skipped,
+    fcs_stap, fcs_pulse, fcs_dairy, fcs_pr,
+    fcs_veg, fcs_fruit, fcs_fat, fcs_sugar, 
+    fcs_borderline_poor, 
+    cs_stress_hh_assets,
+    cs_stress_spent_savings,
+    cs_stress_credit,
+    cs_stress_borrowed_money,
+    cs_crisis_sold_prod_assets,
+    cs_crisis_no_school,
+    cs_crisis_reduced_health_exp,
+    cs_crisis_childwork,
+    cs_crisis_consumed_seed_stocks,
+    cs_emergency_sold_house,
+    cs_emergency_hh_risk,
+    cs_emergency_sold_last_draught,
+    cs_emergency_hh_migration,  
+    hh_debt, 
+    hh_debt_more,
+    survey_id, 
+    agri_activity, 
+    hh_size, 
+    no_accessmarket, 
+    not_improved_drinking_water, 
+    tot_income,
+    income_reduced, 
+    ims_farmer, 
+    ims_casual_non_ag, ims_casual_ag, 
+    ims_public_em, 
+    ims_no_income, 
+    ims_prof_self_em, 
+    ims_stable_non_ag, ims_stable_ag, 
+    ims_other
+  ) %>%
+  mutate(across(where(is.numeric), ~ replace(., is.na(.), 0))) 
+
+```
+
+
+
+housing types are not useful for discrimination 
+
+```{r}
+survey %>%  
+  count(housing_type) %>%  
+  mutate(pc = n / sum(n))
+
+```
+
+## Coefficients
+
+### Removal list 
+
+```{r}
+# Removal list
+
+removal_list <- c("fcs_borderline_poor", "priority", "survey_id", 
+                  "hhfcs_inv", "fies_raw_range", "csi_weighted", "weight_final")
+```
+
+
+### Plot_coef
+
+```{r}
+
+plot_coef <- function(tbl) {
+  
+  tbl %>%
+    tidy(conf.int = TRUE) %>% 
+    filter(term != "(Intercept)") %>% 
+    mutate(term = fct_reorder(term, estimate)) %>%  
+    ggplot(aes(x = estimate, y = term, colour = estimate)) + 
+    geom_vline(xintercept = 0, lty = 2, colour = "red") + 
+    geom_point() + 
+    geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = .2) + 
+    scale_colour_viridis(option = "turbo") + 
+    theme(legend.position = "none", 
+          axis.text.y = element_text(size = 8.5), 
+          axis.title.x = element_text(size = 7, face = "bold"), 
+          plot.title = element_text(size = 9))
+}
+
+```
+
+
+```{r}
+survey_mini %>%  
+  count(no_market, shocks_accessmarket)
+```
+
+
+
+```{r fig.height=8}
+
+
+survey_mini %>%
+  left_join(survey %>% select(score = fs_score, survey_id), by = "survey_id") %>% 
+  select(-survey_id, -matches("cs_|fies_|fcs_")) %>%
+  lm(score ~ . - 1, data = .) %>% 
+  plot_coef() + 
+  labs(title = "Food Insecurity Score") +
+
+survey_mini %>%
+  left_join(survey %>% select(score = hhfcs_inv, survey_id), by = "survey_id") %>% 
+  select(-survey_id, -matches("cs_|fies_|fcs_")) %>%
+  lm(score ~ . - 1, data = .) %>% 
+  plot_coef() + 
+  labs(title =  "Food Consumption Score", y = "") +
+  
+survey_mini %>% 
+  left_join(survey %>% select(score = csi_weighted, survey_id), by = "survey_id") %>% 
+  select(-survey_id, -matches("cs_|fies_|fcs_")) %>%
+  lm(score ~ . - 1, data = .) %>% 
+  plot_coef() + 
+  labs(title = "Coping Strategies Index", y = "") + 
+  
+survey_mini %>% 
+  left_join(survey %>% select(score = fies_raw_range, survey_id), by = "survey_id") %>% 
+  select(-survey_id, -matches("cs_|fies_|fcs_")) %>%
+  lm(score ~ . - 1, data = .) %>% 
+  plot_coef() + 
+  labs(title = "Food Insecurity Experience Scale", y = "")
+  
+ glimpse(survey_mini)
+
+ survey_mini %>% 
+   left_join(survey %>% select(fs_score, survey_id), by = "survey_id") %>% 
+   lm(fs_score ~ no_market - 1, data = .) %>%  
+   tidy()
+   select(no_market)
+   summarise_at("no_market", sum)
+```
+
+```{r}
+survey_mini %>%
+  select(-survey_id) %>% 
+  lm(no_market ~ ., data = .) %>% 
+  tidy(conf.int = TRUE) %>% 
+    filter(term != "(Intercept)") %>% 
+    mutate(term = fct_reorder(term, estimate)) %>%  
+    ggplot(aes(x = estimate, y = term, colour = estimate)) + 
+    geom_vline(xintercept = 0, lty = 2, colour = "red") + 
+    geom_point() + 
+    geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = .2) + 
+    scale_colour_viridis(option = "turbo") + 
+    theme(legend.position = "none", 
+          axis.text.y = element_text(size = 8.5), 
+          axis.title.x = element_text(size = 7, face = "bold"), 
+          plot.title = element_text(size = 9))
+
+glimpse(survey_mini)
+```
+
+
+# Random Forest
+
+### Recipe
+
+```{r}
+
+survey_rf <- survey_mini %>% 
+  left_join(survey %>% select(survey_id, fs_score), by = "survey_id") %>%
+  select(-matches("fcs_|fies_|cs_"), -survey_id) 
+
+set.seed(789)
+
+rf_split <- initial_split(survey_rf, prop = .8) 
+
+rf_recipe <- recipe(shocks_conflict ~ ., data = survey_rf) %>% 
+  step_corr(all_predictors()) %>% 
+  step_center(all_predictors(), -all_outcomes()) %>% 
+  step_scale(all_predictors(), -all_outcomes()) %>% 
+  prep()
+
+```
+
+### VIP
+
+```{r}
+
+train <- juice(rf_recipe)
+test <- juice(rf_recipe) 
+
+rf_spec <- rand_forest(mtry = .cols()) %>% 
+  set_engine("randomForest", importance = TRUE) %>% 
+  set_mode("regression")
+
+rf_fit_train <- fit(rf_spec, fs_score ~ ., data= train)
+rf_fit_test <- fit(rf_spec, shocks_conflict ~ ., data = test)
+
+vip(rf_fit, num_features = 20L, geom = c("col")) +  
+  labs(title = "Variable importance plot -- Food Insecurity")
+
+```
+
+### 75th Percentile
+
+```{r}
+
+survey %>% 
+  select(fs_score, fies_raw_range, csi_weighted, hhfcs_inv) %>% 
+  pivot_longer(cols = everything(), names_to = "score", values_to = "value") %>% 
+  group_by(score) %>% 
+  summarise_at("value", ~ quantile(.x, probs = .75)) 
+```
+
+
+```{r}
+score_plot <- function(tbl) {
+  
+  tbl %>% 
+    ggplot(aes(x = score)) + 
+    geom_histogram(bins = 50) + 
+    scale_x_log10()  
+  
+}
+
+survey %>% 
+  mutate(score = csi_weighted) %>% 
+  score_plot() +
+  geom_vline(xintercept = 0.1428571, lty = 2, colour = "darkgoldenrod2", alpha = .5, lwd = 2) + 
+
+survey %>% 
+  mutate(score = fies_raw_range) %>% 
+  score_plot() +
+  geom_vline(xintercept = 0.2500000, lty = 2, colour = "darkgoldenrod2", alpha = .5, lwd = 2)  
+  
+survey %>% 
+  mutate(score = fs_score) %>% 
+  score_plot() +
+  geom_vline(xintercept = 0.2426743, lty = 2, colour = "darkgoldenrod2", alpha = .7, lwd = 2) + 
+  
+survey %>% 
+  mutate(score = hhfcs_inv) %>% 
+  score_plot() +
+  # geom_vline(xintercept = 0.7083333, lty = 2, colour = "red", alpha = .5, lwd = 2) + 
+  geom_vline(xintercept = (112 - 35) / 112, lty = 2, colour = "darkgoldenrod2", alpha = .7, lwd = 2)  
+  
+
+```
+
+
+
+
+
+1, To buy food
+2, To buy non-food items
+3, To pay for rent or an accomodation
+4, To pay school/education costs
+5, To cover health expenses
+6, To pay for durable goods
+7, To pay for ceremonies/social events
+8, To buy an apartment/house
+9, To pay ticket/cover travel for migration
+10, To buy agricultural land/inputs or livestock
+11, To invest in business
+12, To pay back another loan
+13, Other
+14, DON'T KNOW
+15, REFUSED
+
+### Noaccessmarkets
+
+```{r}
+survey %>% 
+  count(shocks_accessmarket, shocks_conflict)  
+  lm(no_)
+
+survey %>%
+  count(access_market_why)
+  select(matches("access"))
+  
+  
+```
+
+### FIES
+
+```{r}
+survey %>% 
+  select(fies_ateless, fies_fewfoods, fies_healthy, fies_hungry, 
+         fies_worried, fies_ranout, fies_whlday, fies_skipped) %>% cor() %>% corrplot()
+  pivot_longer(cols = everything(), names_to = "score", values_to = "value") %>% 
+  group_by(score) %>% 
+  summarise_at("value", ~ sum(.x))
+  
+survey %>% 
+  select(fies_raw_range, matches("shocks"), -shocks_none) %>% 
+  cor() %>% corrplot()
+```
+
+
+
+# Preparation using tidy models 
+
+### Complete
+
+```{r}
+# different agglomeration options
+# ward definitely works the best 
+
+survey_complete <- recipe(~., data = survey_mini) %>%
+  update_role(survey_id, new_role = "ID") %>% 
+  step_normalize(all_predictors()) %>% 
+  prep() %>%
+  bake(new_data = NULL) %>% 
+  dist() %>% 
+  hclust(method = "complete")
+
+survey_complete$labels <- survey$survey_id
+
+```
+
+### Average
+
+```{r}
+survey_average <- recipe(~., data = survey_mini) %>%
+  step_normalize(all_predictors()) %>% 
+  prep() %>%
+  bake(new_data = NULL) %>% 
+  dist() %>% 
+  hclust(method = "average")
+
+survey_average$labels <- survey$survey_id
+```
+
+
+### Single
+
+```{r}
+survey_single <- recipe(~., data = survey_mini) %>%
+  step_normalize(all_predictors()) %>% 
+  prep() %>%
+  bake(new_data = NULL) %>% 
+  dist() %>% 
+  hclust(method = "single")
+
+survey_single$labels <- survey$survey_id
+```
+
+
+### Ward
+
+```{r}
+# Using ward
+survey_ward <- recipe(~., data = survey_mini) %>%
+  update_role(survey_id, new_role = "ID") %>% 
+  step_normalize(all_predictors()) %>% 
+  prep() %>%
+  bake(new_data = NULL) %>% 
+  dist() %>% 
+  hclust(method = "ward.D2")
+
+survey_ward$labels <- survey$survey_id
+
+glimpse(survey_ward)
+```
+
+### K-means
+
+```{r}
+# k-means clustering and output
+set.seed(123)
+
+km_data <- recipe(~., data = survey_mini) %>% 
+  update_role(survey_id, new_role = "ID") %>%
+  step_normalize(all_predictors()) %>% 
+  prep() %>% 
+  bake(new_data = NULL)
+
+km_res <- km_data %>%  
+  select(-survey_id) %>% 
+  kmeans(10, nstart = 25)
+
+
+survey_km <- survey_mini %>% 
+  cbind(cluster = km_res$cluster) %>% 
+  left_join(survey_mini_clust %>% 
+              select(cluster, survey_id), by = "survey_id") %>% 
+   left_join(survey %>%
+              select(survey_id, adm3_pcode, hhfcs_inv, fies_raw_range, csi_weighted, fs_score), 
+            by = "survey_id") %>% 
+  left_join(read_csv("./data/pcodes.csv") %>% 
+              select(admin3_pcode, state) %>% 
+              distinct(), 
+              by = c("adm3_pcode" = "admin3_pcode")) %>%
+  group_by(cluster) %>% 
+  mutate(cluster_count = ifelse(is.na(cluster), 0, 1), 
+         cluster_n = sum(cluster_count)) %>% 
+  ungroup()
+```
+
+```{r}
+survey_mini_clust <- survey_mini %>% 
+  cbind(cluster = km_res$cluster) %>% 
+  mutate(cluster = recode(cluster, 
+                          `1` = "L", `2` = "M", `3` = "N", `4` = "O" ,`5` = "P", 
+                          `6` = "Q", `7` = "R", `8` = "S", `9` = "T", `10` = "U")) %>% 
+  left_join(survey %>%
+              select(survey_id, adm3_pcode), 
+            by = "survey_id") %>% 
+  left_join(read_csv("./data/pcodes.csv") %>% 
+              select(admin3_pcode, state) %>% 
+              distinct(), 
+              by = c("adm3_pcode" = "admin3_pcode")) %>%
+  group_by(cluster) %>% 
+  mutate(cluster_count = ifelse(is.na(cluster), 0, 1), 
+         cluster_n = sum(cluster_count)) %>% 
+  ungroup()
+```
+
+
+```{r}
+fviz_cluster(km_survey, data = km_data)
+```
+
+
+### Dendrogram options
+
+```{r}
+plot(survey_ward) 
+rect.hclust(survey_ward, k = 8)
+```
+
+
+```{r}
+survey_clust %>% as.dendrogram() %>% set("branches_k_color", k = 11) %>% 
+  plot(main = "Default colors")
+```
+
+# Survey_clust
+
+
+```{r}
+survey_hclust <- tibble(
+  label = survey_ward$labels,
+  cluster_id = cutree(survey_ward, k = 10)) %>%
+  right_join(survey_mini, by = c("label" = "survey_id")) %>% 
+  mutate(cluster = case_when(cluster_id ==  1 ~ "L",
+                             cluster_id ==  2 ~ "M", 
+                             cluster_id ==  3 ~ "N", 
+                             cluster_id ==  4 ~ "O", 
+                             cluster_id ==  5 ~ "P", 
+                             cluster_id ==  6 ~ "Q", 
+                             cluster_id ==  7 ~ "R", 
+                             cluster_id ==  8 ~ "S",
+                             cluster_id ==  9 ~ "T", 
+                             cluster_id ==  10 ~ "U", 
+                             cluster_id == 11 ~ "V")) %>% 
+  rename(survey_id = label) %>% 
+  left_join(survey %>%
+              select(survey_id, adm3_pcode), 
+            by = "survey_id") %>% 
+  left_join(read_csv("./data/pcodes.csv") %>% 
+              select(admin3_pcode, state) %>% 
+              distinct(), 
+              by = c("adm3_pcode" = "admin3_pcode")) %>%
+  mutate(cluster_id = as.factor(cluster_id)) %>% 
+  group_by(cluster_id) %>% 
+  mutate(cluster_count = ifelse(is.na(cluster_id), 0, 1), 
+         cluster_n = sum(cluster_count)) %>% 
+  ungroup()
+
+
+
+
+```
+
+
+
+## Plotting the clusters against food insecurity indices 
+
+```{r}
+plot_score <- function(tbl) {
+  
+  tbl %>%
+    left_join(survey %>% select(survey_id, weight_final), by = "survey_id") %>% 
+    # filter(cluster_n >= 50) %>% 
+    ggplot(aes(x = cluster, y = value)) +
+    geom_jitter(aes(colour = value, size = hh_size), alpha = .25) +
+    geom_boxplot(alpha = .3, lwd = 1.3, 
+                 aes(fill = weight_final)) +
+    scale_colour_viridis(option = "magma", direction = -1) +
+    theme(legend.position = "none")  
+    
+}
+
+survey_clust %>% 
+  left_join(survey %>% select(survey_id, weight_final), by = "survey_id") %>% 
+  group_by(cluster) %>% 
+  mutate(weight = sum(weight_final), 
+         weight_pc = weight / sum(weight)) %>%
+  ungroup() %>% 
+  ggplot(aes(x = weight_final, y = fs_score, group = cluster, colour = cluster)) + 
+  geom_boxplot() +
+  # geom_point() + 
+  theme(legend.position = "top") + 
+  guides(colour = guide_legend(nrow = 1)) +
+  labs(colour = "")
+  
+survey_clust %>% 
+  left_join(survey %>% select(survey_id, weight_final), by = "survey_id") %>% 
+  group_by(cluster) %>% 
+  mutate(weight = sum(weight_final), 
+         weight_pc = weight / sum(weight)) %>%
+  ungroup() %>% 
+  ggplot(aes(x = weight_final, y = fs_score, group = cluster, colour = cluster)) + 
+  # geom_boxplot() +
+  geom_point(alpha = .4) + 
+  theme(legend.position = "top") + 
+  guides(colour = guide_legend(nrow = 1)) + 
+  labs(colour = "")
+
+
+```
+
+
+```{r fig.height=8}
+survey_clust %>% 
+  mutate(value = hhfcs_inv) %>% 
+  plot_score() +
+  geom_hline(yintercept = 0.7083333, lty = 2, colour = "red", alpha = .5, lwd = 2) + 
+  geom_hline(yintercept = (112 - 35) / 112, lty = 2, colour = "darkgoldenrod2", alpha = .5, lwd = 2) + 
+  labs(x = "cluster", y = "Food consumption score (re-scaled)",
+       title = "Food consumption score (re-scaled)", 
+       subtitle = "Red line is the 75th percentile.") +
+
+survey_clust %>% 
+  mutate(value = csi_weighted) %>%
+  plot_score() + 
+  geom_hline(yintercept = 0.1428571, lty = 2, colour = "red", alpha = .5, lwd = 2) +
+  labs(x = "cluster", y = "Coping strategies index  (re-scaled)", 
+       title = "Coping strategies index  (re-scaled)", 
+       subtitle = "Red line is the 75th percentile.") +
+
+survey_clust %>% 
+  mutate(value = fies_raw_range) %>% 
+  plot_score() +
+  geom_hline(yintercept = 0.25, lty = 2, colour = "red", alpha = .5, lwd = 2) + 
+  labs(x = "cluster", y = "Food insecurity experience scale (re-scaled)", 
+       title = "Food insecurity experience scale (re-scaled)", 
+       subtitle = "Red line is the 75th percentile.") +
+
+survey_clust %>% 
+  mutate(value = fs_score) %>% 
+  plot_score() +
+  geom_hline(yintercept = 0.2426224, lty = 2, colour = "red", alpha = .5, lwd = 2) + 
+  theme(legend.position = "none") +
+  labs(x = "cluster", y = "Food insecurity score  (re-scaled)", 
+       title = "Food insecurity score  (re-scaled)", 
+       subtitle = "Red line is the 75th percentile.") +
+  
+  plot_layout(widths = 1) + 
+  plot_annotation(title = "Comparison between clusters and food security indices", 
+                  subtitle = "Darker colours show higher food insecurity", 
+                  caption = "Data source: WFP-FAO survey", 
+                  theme = theme(plot.caption = element_text(hjust = .5)))
+
+
+```
+
+
+
+
+
+```{r}
+survey_clust %>% 
+  summarise(upper = quantile(fs_score, probs = .75))
+survey_clust %>% 
+  summarise(mean = mean(fies_raw_range, na.rm = TRUE), 
+            upper = quantile(fies_raw_range, probs = .75))
+survey_clust %>% 
+  summarise(upper = quantile(csi_weighted, probs = .75), 
+            mean = quantile(csi_weighted, probs = .5))
+
+survey_clust %>% 
+  summarise(upper = quantile(hhfcs_inv, probs = .75), 
+            mean = quantile(hhfcs_inv, probs = .5))
+
+```
+
+
+
+
+
+
+```{r fig.height=8}
+
+
+survey_clust %>% 
+  ggplot(aes(x = cluster_id, y = fs_score)) + 
+  geom_jitter(aes(colour = fs_score, size = hh_size), alpha = .7) +
+  geom_boxplot(alpha = .3, colour = "darkgoldenrod1", lwd = 1.8) +
+  scale_colour_viridis(option = "magma")  +
+  theme(legend.position = "none") 
+
+survey_clust %>%  select(matches("fs_score"))
+
+survey_clust %>% 
+  ggplot(aes(x = cluster_id, y =hhfcs_inv)) + 
+  geom_jitter(aes(colour = fcs_borderline_poor, size = hh_size), alpha = .7) +
+  geom_boxplot(alpha = .3, colour = "darkgoldenrod1", lwd = 1.8) +
+  scale_colour_viridis(option = "magma")  +
+  theme(legend.position = "none") 
+```
+
+```{r}
+survey_clust %>% 
+  mutate(value = fs_score) %>% 
+  summarise(mean = quantile(value, probs = .5),
+            lower = quantile(value, probs = .25),
+            upper = quantile(value, probs = .75))
+  summarise(percentile = ntile(value, 75))
+
+survey_clust %>%
+  summarise(mean = mean(shocks_conflict, na.rm = TRUE))
+
+survey3 %>%  
+  filter(hh_debt ==  1) %>% 
+  count(hh_debt_borrow_from) %>% 
+  mutate(n = n / sum(n))
+
+
+
+```
+
+
+## Boxplot state 
+
+```{r fig.height=8}
+survey_clust %>% 
+  mutate(wt_pc = weight_final / sum(weight_final)) %>%
+  filter(!is.na(state)) %>%
+  group_by(state) %>% 
+  mutate(median = median(fs_score),
+         combined_wt = sum(wt_pc)) %>% 
+  ungroup() %>% 
+  
+  ggplot(aes(x = fct_reorder(state, median), y = median, group = state)) + 
+  # geom_jitter(aes(colour = fs_score, size = hh_size), alpha = .3) +
+  geom_boxplot(colour = "darkgoldenrod1", lwd = 1.5, 
+               alpha = .6, 
+               aes(fill = weight_final)) +
+  geom_jitter()
+  # scale_fill_viridis(option = "mako", direction = -1)  +
+  scale_y_log10()
+
+survey_clust %>%  
+  mutate(wt_pc = weight_final / sum(weight_final)) %>% 
+  filter(!is.na(state) & !is.na(weight_final)) %>% 
+  
+  group_by(state) %>% 
+  mutate(median = median(fs_score), 
+         wt_pc_state = sum(wt_pc, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  
+  ggplot(aes(x = fct_reorder(state, median), y = fs_score)) +
+    geom_jitter(aes(colour = wt_pc, size = wt_pc * 100), alpha = 1) +
+    geom_boxplot(alpha = .6, colour = "grey20", 
+                 aes(lwd = wt_pc_state)) +
+    scale_colour_viridis(option = "mako", direction = -1) +
+    theme(legend.position = "none")  + 
+  geom_hline(yintercept = 0.2426743, lwd = 2, colour = "red", lty = 2, alpha = .5)
+
+survey %>% ggplot(aes(x = fs_score)) + geom_histogram()
+
+```
+
+
+If you work with those in Cluster 4, that 
+If you work in Cluster 5, with conflict, the variables you should consider are 
+
+
+## Reference table
+
+```{r fig.height=8}
+  
+js <- c(
+  "function(settings){",
+  "  var datatable = settings.oInstance.api();",
+  "  var table = datatable.table().node();",
+  "  var caption = 'fs_score, fcs, fies & csi rescaled between 0 (best) and 1 (worst); other columns show percentages of group populations.'",
+  "  $(table).append('<caption style=\"caption-side: bottom\">' + caption + '</caption>');",
+  "}"
+)
+
+survey_clust %>% 
+  left_join(survey %>% select(survey_id, weight_final)) %>% 
+  # filter(cluster_id !=  "O") %>%
+  filter(hh_size != 0) %>% 
+  # mutate(cluster = case_when(cluster == "O" ~ "S", TRUE ~ paste0(cluster))) %>% 
+  group_by(cluster) %>% 
+  summarise(sample = n(),
+            
+            fs_score = mean(fs_score, na.rm = TRUE),
+            fies = mean(fies_raw_range, na.rm = TRUE),
+            csi = mean(csi_weighted, na.rm = TRUE), 
+            fcs = mean(hhfcs_inv, na.rm = TRUE),
+            weighted = sum(weight_final, na.rm = TRUE), 
+            rural = mean(rural, na.rm = TRUE), 
+            income_reduced = mean(income_reduced, na.rm = TRUE),
+            debt = mean(hh_debt, na.rm = TRUE), 
+            conflict = mean(shocks_conflict), 
+            lost_work = mean(shocks_lostwork), 
+            food_prices = mean(shocks_foodprices), 
+            stable_non_ag = mean(stable_non_ag),
+            farmer = mean(farmer), 
+            prof_self_em = mean(prof_self_em), 
+            stable_ag = mean(stable_ag), 
+            casual_ag = mean(casual_ag), 
+            casual_non_ag = mean(casual_non_ag), 
+            public_em = mean(public_em), 
+            no_income = mean(no_income),
+            income_other = mean(other), 
+            
+            children_0_4 = mean(children_0_4, na.rm = TRUE), 
+            edu_secondary = mean((edu_secondary + edu_higher), na.rm = TRUE),
+            tot_income = sum(tot_income, na.rm = TRUE),
+            pop = sum(hh_size, na.rm = TRUE)) %>%  
+  mutate_at(vars(rural:children_0_4), ~ round(.x * 100, digits = 2)) %>% 
+  mutate_at(vars(fs_score, fies, csi, fcs), ~ range_wna(.x)) %>%
+  mutate_at(vars(sample), ~ round((.x)/ sum(.x) * 100, digits = 2)) %>% 
+  mutate_at(vars(weighted), ~ round((.x)/ sum(.x) * 100, digits = 2)) %>% 
+  mutate(income_pc = round(tot_income / pop, digits = 0)) %>% 
+  select(-tot_income, -pop, -sample) %>% 
+  relocate(income_pc, .after = rural) %>% 
+  arrange(desc(fs_score)) 
+  # filter(sample >= 1) %>% 
+  
+
+
+  datatable(filter = list(position = "top", clear = FALSE),
+            options = list(pageLength = 11, scrollX = TRUE,
+              initComplete = JS(js),#This will avoid looping of the caption when there is pagination
+              headerCallback = DT::JS("function(thead) {", 
+                          "  $(thead).css('font-size', '.8em');",
+                          "}")),
+  caption = htmltools::tags$caption(style = "caption-side: top; color: black; 
+                                              text-align: center; font-size: 130%;",
+                                              "Possible component of a beneficiary profile"), 
+  ) %>%  
+  formatRound(c("fs_score", "fies", "csi", "fcs", "edu_secondary"), digits = 3) %>%
+  formatStyle(0, target = "row", lineHeight = "80%", fontSize = "80%") 
+
+survey_clust %>% glimpse()
+  mutate(na_tot_income = ifelse(tot_income == 0, 1, 0), 
+         na_hh_size = ifelse(hh_size == 0, 1, 0)) %>% 
+  count(na_hh_size, na_tot_income)
+
+
+```
+
+
+```{r}
+survey_clust %>% 
+  left_join(survey %>% select(survey_id, weight_final)) %>% 
+  # filter(cluster_id !=  "O") %>%
+  filter(hh_size != 0) %>% 
+  # mutate(cluster = case_when(cluster == "O" ~ "S", TRUE ~ paste0(cluster))) %>% 
+  group_by(cluster) %>% 
+  summarise(sample = n(),         
+            fs_score = mean(fs_score, na.rm = TRUE),
+            fies = mean(fies_raw_range, na.rm = TRUE),
+            csi = mean(csi_weighted, na.rm = TRUE), 
+            fcs = mean(hhfcs_inv, na.rm = TRUE),
+            weighted = sum(weight_final, na.rm = TRUE), 
+            rural = mean(rural, na.rm = TRUE), 
+            income_reduced = mean(income_reduced, na.rm = TRUE),
+            debt_more = mean(hh_debt_more, na.rm = TRUE), 
+            conflict = mean(shocks_conflict), 
+            lost_work = mean(shocks_lostwork), 
+            food_prices = mean(shocks_foodprices), 
+            stable_non_ag = mean(stable_non_ag),
+            farmer = mean(farmer), 
+            prof_self_em = mean(prof_self_em), 
+            stable_ag = mean(stable_ag), 
+            casual_ag = mean(casual_ag), 
+            casual_non_ag = mean(casual_non_ag), 
+            public_em = mean(public_em), 
+            no_income = mean(no_income),
+            income_other = mean(other), 
+            children_0_4 = mean(children_0_4, na.rm = TRUE), 
+            edu_secondary = mean((edu_secondary + edu_higher), na.rm = TRUE),
+            tot_income = sum(tot_income, na.rm = TRUE),
+            pop = sum(hh_size, na.rm = TRUE)) %>%  
+  mutate_at(vars(rural:children_0_4), ~ round(.x * 100, digits = 2)) %>% 
+  mutate_at(vars(fs_score, fies, csi, fcs), ~ range_wna(.x)) %>%
+  mutate_at(vars(sample), ~ round((.x)/ sum(.x) * 100, digits = 2)) %>% 
+  mutate_at(vars(weighted), ~ round((.x)/ sum(.x) * 100, digits = 2)) %>% 
+  mutate(income_pc = round(tot_income / pop, digits = 0)) %>% 
+  select(-tot_income, -pop, -sample) %>% 
+  relocate(income_pc, .after = rural) %>% 
+  arrange(desc(fs_score)) 
+  
+```
+
+L are the most  in need 
+
+```{r}
+survey_clust %>%
+  filter(cluster == "R") %>% 
+  select(matches("cs_")) %>% 
+  pivot_longer(cols = everything(), 
+               names_to = "var", 
+               values_to = "value") %>% 
+  group_by(var) %>% 
+  summarise_all(mean)
+```
+
+
+
+
+1, Farmer / Production and sale of staple crops
+2, Farmer / Production and sale of vegetable or fruit
+3, Farmer / Production and sale of cashcrops
+4, Farmer / Production and sale of livestock and livestock products
+5, Farmer / Production and sale of fish
+6, Collection and sale of forestry or bush products
+7, Informal agricultural trade EXCLUDING producers
+8, Formal agricultural trade EXCLUDING producers
+9, Daily wage on farms and other casual employment in agricultural sector
+10, Stable employment in agricultural sector
+11, Non-agricultural self-employed or liberal profession / doctor / architect / lawyer / including restaurant
+12, Off-farm daily wages and other non-agricultural casual employment
+13, Stable employment in non-agricultural sector
+14, Public employment
+15, Income not derived from work / Charity
+16, Income not derived from work / Welfare transfer / pension / humanitarian aid
+17, Income not derived from work / Remittances
+18, Income not derived from work / Income from other rents
+19, No income source in the last 3 months and used exclusively savings
+20, No income source in the last 3 months and used exclusively debt
+21, REFUSED
+
+```{r}
+
+survey %>% 
+  left_join(tribble(~income_main, ~income_main_source, ~sub_groups,
+        1, "Farmer / Production and sale", "Farmer / Production and sale of staple crops",
+        2, "Farmer / Production and sale", "Farmer / Production and sale of vegetable or fruit", 
+        3, "Farmer / Production and sale", "Farmer / Production and sale of cashcrops",
+        4, "Farmer / Production and sale", "Farmer / Production and sale of livestock and livestock products",
+        5, "Farmer / Production and sale", "Farmer / Production and sale of fish",
+        6, "Collection and sale of forestry or bush products", "",
+        7, "Informal agricultural trade EXCLUDING producers", "",
+        8, "Formal agricultural trade EXCLUDING producers", "",
+        9, "Daily wage on farms and other casual employment in agricultural sector", "",
+        10, "Stable employment in agricultural sector", "",
+        11, "Non-agricultural self-employed or liberal profession / doctor / architect / lawyer / including restaurant", "",
+        12, "Off-farm daily wages and other non-agricultural casual employment", "",
+        13, "Stable employment in non-agricultural sector",  "",
+        14, "Public employment", "",
+        15, "Income not derived from work / Charity", "",
+        16, "Income not derived from work / Welfare transfer / pension / humanitarian aid", "",
+        17, "Income not derived from work / Remittances", "",
+        18, "Income not derived from work / Income from other rents", "",
+        19, "No income source in the last 3 months and used exclusively savings", "",
+        20, "No income source in the last 3 months and used exclusively debt", "",
+        21, "REFUSED", ""), 
+        by = "income_main") %>% 
+  count(income_main_source, sort = TRUE) %>% 
+  mutate(pc = n / sum(n))
+  select(survey_id, income_main_source) %>%
+  mutate(count = ifelse(!is.na(income_main_source), 1, 0)) %>%
+  pivot_wider(names_from = income_main_source, values_from = count, values_fill = 0) %>% 
+  janitor::clean_names()
+  count(income_main_source, sort = TRUE) %>% 
+  mutate(pc = n / sum(n))
+ 
+
+ 
+
+```
+
+
+## State
+
+```{r}
+glimpse(survey)
+
+survey %>% 
+  group_by(adm1_name_en) %>%  
+  summarise(conflict = mean(shocks_conflict), 
+            count = n(), 
+            weight = sum(weight_final)) %>% 
+  mutate(pc_weight = weight / sum(weight)) %>% 
+  arrange(desc(conflict))
+
+survey_mini %>%  
+  select(-su)
+  lm(shocks_conflict ~ .,  data = .) %>% 
+  tidy()
+```
+
+
+## Alternate clustering
+
+### Debt
+
+```{r}
+survey_mini %>% 
+  group_by(hh_debt) %>% 
+  
+  summarise_all(mean)
+  
+survey_mini %>% count(hh_debt)
+
+survey_mini %>%
+  select(hh_debt_more, matches("fies|cs_|fcs_")) %>% 
+  lm(hh_debt_more ~ ., data = ., family = "binomial") %>% 
+  plot_coef() + 
+
+survey_mini %>% 
+  select(hh_debt, matches("fies|cs_|fcs_")) %>% 
+  lm(hh_debt ~ ., data = ., family = "binomial") %>% 
+  plot_coef()
+
+survey_mini %>% 
+  mutate(stress_borrowed_money = cs_stress_borrowed_money) %>% 
+  select(-matches("fies|cs_|fcs_"), -matches("from_|why_")) %>% 
+  lm(stress_borrowed_money ~ ., data = .) %>% 
+  plot_coef()
+
+  nest(-hh_debt) %>% 
+  map(data, ~ lm(fs_score))
+  
+```
+
+
+### Income Source
+```{r fig.height=8}
+
+survey_mini %>% 
+  select(matches("ims"), survey_id) %>% 
+  pivot_longer(cols = -survey_id, names_to = "income_main_source", values_to = "value") %>%  
+  filter(value == 1) %>% 
+  left_join(survey %>% 
+              select(fs_score, survey_id), by = "survey_id") %>% 
+  lm(fs_score ~ income_main_source, data = .) %>% 
+  tidy(conf.int = TRUE) %>% 
+    filter(term != "(Intercept)") %>% 
+    mutate(term = str_replace(term, "income_main_sourceims_", "")) %>%  
+  left_join(
+    
+    survey %>%
+      select(matches("ims"), survey_id, weight_final) %>%
+      pivot_longer(cols = -c(survey_id, weight_final), names_to = "term", values_to = "value") %>%  
+      mutate(term = str_replace(term, "ims_", "")) %>%  
+      mutate(value = value * weight_final) %>% 
+      group_by(term) %>% 
+      summarise_at("value", sum)
+    , 
+    by = "term"
+    
+            ) %>% 
+  mutate(term = fct_reorder(term, estimate)) %>% 
+    ggplot(aes(x = estimate, y = term, colour = estimate)) + 
+    geom_vline(xintercept = 0, lty = 2, colour = "red") + 
+    geom_point(aes(size = value)) + 
+    geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = .2, width = 1.5) + 
+    scale_colour_viridis(option = "turbo") + 
+    theme(legend.position = "none", 
+          axis.text.y = element_text(size = 8.5), 
+          axis.title.x = element_text(size = 7, face = "bold"), 
+          plot.title = element_text(size = 9))
+
+
+```
+
+
+```{r}
+survey_mini %>% 
+  select(matches("ims"), survey_id) %>% 
+  pivot_longer(cols = -survey_id, names_to = "income_main_source", values_to = "value") %>%  
+  filter(value == 1) %>% 
+  left_join(survey %>% select(fs_score, weight_final, )) 
+  
+```
+
+```{r}
+survey %>% count(income_main)
+```
+
+
+```{r}
+survey_mini %>% 
+  left_join(survey %>% select(fs_score, survey_id), by = "survey_id") %>%  
+  select(fs_score, matches("ims")) %>% 
+  lm(fs_score ~ ., data = .) %>% 
+  tidy()
+
+survey %>%
+  select(fs_score, income_main)
+```
+
+
+
+```{r}
+survey_mini %>% count(hh_debt, hh_debt_more)
+```
+
+
+### Shocks 
+
+```{r}
+
+survey %>%  
+  summarise_at(c("shocks_conflict",
+    "shocks_lostwork",
+    "shocks_naturalhazard", 
+    "shocks_accessmarket", 
+    "shocks_foodprices",
+    "shocks_cantworkbusiness"), sum)
+```
+
+
+```{r}
+survey %>% 
+  filter(hh_debt_more == 1) %>% 
+  left_join(tribble(~hh_debt_borrow_from, ~debt_borrow_from_text,
+                    1, "x66_Relatives",
+                    2, "x66_Relatives living outside the country",
+                    3, "x66_Traders/shopkeepers",
+                    4, "x66_Bank/Credit institution/Government/Micro-credit project",
+                    5, "x66_Money lender",
+                    6, "x66_Landlord [more than 1 month behind in rent]",
+                    7, "x66_Informal savings group",
+                    8, "x66_Employer",
+                    9, "x66_Other")) %>% 
+  mutate(count = ifelse(!is.na(debt_borrow_from_text), 1, 0)) %>% 
+  pivot_wider(names_from = debt_borrow_from_text, values_from = count, values_fill = 0) %>% 
+  clean_names() %>%
+  select(matches("x"))
+  
+survey %>% 
+  count(hh_debt_borrow_from, sort = TRUE)
+
+survey %>% 
+  count(hh_debt_borrow_why, sort = TRUE)
+
+ 
+
+```
+
+```{r}
+
+```
+
+
+
+```{r}
+survey_clust %>% 
+  ggplot(aes(x = conflict, y = (income_pc + 1) * ))
+```
+
+ M and Q are just food secure. 
+ 
+ S working and food insecure 
+ Multidimensional
+ heavily indebted 
+ 
+```{r}
+survey %>% glimpse()
+```
+ 
+ 
+ Income 
+ 
+ Two large groups -- ones whose main income is stable, non-agricultural work and those who do not. 
+ 
+ Groups **M**, **P**, and **L**, together `r 42.06 + 4.73 + 5.32`% of the sample population. They have the highest incomes per capita 
+ 
+ 
+### Farmers
+ 
+Needs and targets for crops 
+
+Needs and targets for livelihood activities
+
+Depth of assistance -- it really gives the wrong impression 
+
+Three months at 2,100 kcal/day 
+
+
+
+```{r}
+
+```
+
+ 
+ 
+
+
+```{r}
+survey_mini %>% 
+  select(-edu_religious, -edu_none) %>% 
+  cor() %>% 
+  corrplot(tl.cex = 1.5)
+```
+
+
+Can these groups be linked to the township prioritisation groups? 
+It has been proven in other contexts that education is a strong predictor of wealth and also of adaptability to shocks and stresses
+
+
+

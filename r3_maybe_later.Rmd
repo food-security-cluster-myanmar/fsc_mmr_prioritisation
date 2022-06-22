@@ -1,0 +1,38 @@
+---
+title: "Untitled"
+output: html_document
+date: '2022-06-16'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+survey %>%  
+  ggplot(aes(x = shocks_conflict, y = shocks_lostwork)) + 
+  geom_jitter()
+
+survey %>%
+  select(matches("shocks")) %>% 
+  pivot_longer(cols = everything(), names_to = "score", values_to = "value") %>% 
+  group_by(score) %>% 
+  summarise_at("value", ~ sum(.x)) %>% 
+  arrange(desc(value))
+
+survey %>%
+  select(matches("shocks"), -shocks_none) %>% 
+  cor() %>%
+  corrplot()
+```
+
+
+```{r}
+survey_mini %>%   
+  cor() %>% 
+  # pivot_longer(cols = everything(), names_to = "var", values_to = "value") %>% 
+  corrplot()
+```
+
+
+

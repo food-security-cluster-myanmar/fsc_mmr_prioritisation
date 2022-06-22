@@ -1,0 +1,88 @@
+---
+title: "Event Dates"
+date: "13/06/2022"
+output: 
+  html_document:
+    code_download: true
+    code_folding: hide
+    theme: readable
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    number_sections: false
+    collapsed: false
+always_allow_html: true   
+---
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+library(tidyverse)
+library(janitor)
+library(readxl)
+library(haven)
+library(lubridate)
+library(mdepriv)
+
+range01 <- function(x){(x-min(x))/(max(x)-min(x))}
+range_wna <- function(x){(x-min(x, na.rm = TRUE))/(max(x, na.rm = TRUE)-min(x, na.rm = TRUE))}
+
+```
+
+```{r}
+# ACLED dataset
+acled <- read_csv("./data/acled_new.csv") %>% 
+  mutate(has_village = if_else(location != admin3, "yes", "no")) %>% 
+  mutate(weekday = weekdays(as.POSIXct(event_date), abbreviate = T))
+  # mutate(weekday = wday(event_date))
+```
+
+```{r}
+acled %>%
+  # filter(sub_event_type == "Peaceful protest") %>% 
+  filter(year >= 2021) %>%
+  group_by(weekday) %>% 
+  summarise(events = n()) %>% 
+  mutate(weekday = fct_relevel(weekday, c("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"))) %>% 
+  ggplot(aes(x = weekday, y = events, fill = weekday, group = weekday)) +
+  geom_col()
+  scale_x_date(date_breaks = "1 month", labels = date_format(format = "%Y-%b")) +
+  labs(x = "", 
+       y = "Number of conflict events", 
+       title = "Ratio of peaceful protests to non-peaceful incidents", 
+       subtitle = "1 Jan 2021 - 31 May 2022", 
+       caption = "Data source: Armed Conflict Location & Event Data Project (ACLED); acleddata.com") + 
+  theme(legend.position = "top",
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1), 
+        plot.caption = element_text(hjust = .5))
+  
+  sum_ben2 <- function(df, column_var1, column_var2){
+  
+  column_var1 <- enquo(column_var1)
+  column_var2 <- enquo(column_var2)
+  
+  df %>%
+    group_by(!!column_var1, !!column_var2) %>% # must add bang-bang
+    summarise(beneficiaries = sum(beneficiaries)) %>% 
+    arrange(desc(beneficiaries))
+    
+}
+  
+weekday_plot <- function(tbl) {
+  
+  tbl %>% 
+    filter(year <= 2021) %>% 
+    group_by(weekday) %>% 
+    summarise(events = n()) %>% 
+    mutate(weekday = fct_relevel(weekday, c("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"))) %>%
+    ggplot(aes(x = weekday, y = events, fill = weekday, group = weekday)) +
+    geom_col() +
+    guides(fill = "none")
+}
+
+acled %>% 
+  filter(sub_event_type == "Remote explosive/landmine/IED") %>% 
+  weekday_plot()
+
+acled %>% count(sub_event_type)
+```
+

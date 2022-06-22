@@ -1,0 +1,308 @@
+---
+title: "Untitled"
+output: html_document
+date: '2022-04-06'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(haven)
+library(psych)
+library(skimr)
+library(mdepriv)
+library(broom)
+library(janitor)
+
+# scaling functions 
+range01 <- function(x){(x-min(x))/(max(x)-min(x))}
+
+range_wna <- function(x){(x-min(x, na.rm = TRUE))/(max(x, na.rm = TRUE)-min(x, na.rm = TRUE))}
+```
+
+## Survey round 3
+
+```{r}
+fao_survey3 <- read_dta("./data/FAO_WFP_HHsurvey_Rd3_CleanedMMR.dta") %>% 
+  zap_labels() %>%  
+  rename_with(.fn = ~ str_replace(.x, "o_", ""), 
+              .cols = starts_with("o_")) %>% 
+  clean_names()
+
+
+```
+
+```{r}
+income_main <- tribble(~income_main, ~income_main_source, ~main_sub_groups,
+        1, "ims_farmer_staple", "Farmer / Production and sale of staple crops",
+        2, "ims_farmer_veg_fruit", "Farmer / Production and sale of vegetable or fruit", 
+        3, "ims_farmer_cash_crops", "Farmer / Production and sale of cashcrops",
+        4, "ims_fish_livestock", "Farmer / Production and sale of livestock and livestock products",
+        5, "ims_fish_livestock", "Farmer / Production and sale of fish",
+        6, "ims_other","main_Collection and sale of forestry or bush products", 
+        7, "ims_other","main_Informal agricultural trade EXCLUDING producers", 
+        8, "ims_other","main_Formal agricultural trade EXCLUDING producers", 
+        9, "ims_casual_ag", "main_Daily wage on farms and other casual employment in agricultural sector", 
+        10, "ims_stable_ag", "main_Stable employment in agricultural sector", 
+        11, "ims_prof_self_em",  "main_Non-agricultural self-employed or liberal profession / doctor / architect / lawyer / including restaurant",
+        12, "ims_casual_non_ag", "main_Off-farm daily wages and other non-agricultural casual employment", 
+        13, "ims_stable_non_ag", "main_Stable employment in non-agricultural sector", 
+        14, "ims_public_em", "main_Public employment", 
+        15, "ims_other", "main_Income not derived from work / Charity", 
+        16, "ims_other", "main_Income not derived from work / Welfare transfer / pension / humanitarian aid", 
+        17, "ims_other", "main_Income not derived from work / Remittances", 
+        18, "ims_other", "main_Income not derived from work / Income from other rents", 
+        19, "ims_no_income", "main_No income source in the last 3 months and used exclusively savings", 
+        20, "ims_no_income", "main_No income source in the last 3 months and used exclusively debt", 
+        21, "ims_other", "main_REFUSED")
+```
+
+
+```{r}
+
+survey3 <- fao_survey3 %>% 
+  mutate_at(vars(cs_stress_hh_assets:cs_emergency_hh_migration ), 
+            ~ case_when(. == 4 ~ NA_real_,
+                       TRUE ~ .)) %>% 
+  mutate_at(vars(cs_stress_hh_assets:cs_emergency_hh_migration ), 
+            ~ case_when(. == 1 ~ 1,
+                       . == 2 ~ 0, 
+                       . == 1 ~ 1, 
+                       TRUE ~ 0)) %>%
+  mutate_at(vars(hh_gender, fies_fewfoods, fies_skipped, fies_whlday, fies_ateless, fies_hungry, 
+                 fies_ranout, fies_worried, fies_healthy, 
+                 crp_salesdif, access_market, need, crp_proddif), 
+            ~ case_when(. == 3 ~ NA_real_, 
+                       . == 4 ~ NA_real_, 
+                       TRUE ~ .)) %>% 
+  mutate(hoh_female = case_when(hh_gender == 1 ~ 0, 
+                                hh_gender == 2 ~ 1,
+                                TRUE ~ hh_gender)) %>%
+  mutate_at(vars(hh_gender, fies_fewfoods, fies_skipped, fies_whlday, fies_ateless, 
+                 fies_hungry, fies_ranout, fies_worried, fies_healthy,
+                 access_market, need, crp_salesdif, crp_proddif),
+            ~ case_when(. == 1 ~ 1, 
+                       . == 2 ~ 0, 
+                       TRUE ~ 0)) %>%
+  mutate(no_accessmarket = ifelse(access_market == 1, 0, 1)) %>% 
+  mutate(fies_raw = fies_fewfoods + fies_skipped + fies_whlday + fies_hungry +
+           fies_ateless + fies_healthy + fies_ranout + fies_worried, 
+         fies_raw_range = range_wna(fies_raw)) %>% 
+  mutate_at(vars(hh_residencetype, hh_education,
+                 income_main_comp, income_sec_comp, income_third_comp, 
+                 crp_area_change, crp_harv_change, crp_salesprice),
+            ~ case_when(. == 6 ~ NA_real_,
+                       . == 7 ~ NA_real_, 
+                       TRUE ~ .)) %>% 
+  mutate_at(vars(income_main_comp, income_sec_comp, income_third_comp, 
+                 crp_area_change, crp_harv_change, crp_salesprice),
+            ~ range_wna(.)) %>%
+  mutate(not_improved_drinking_water = ifelse(source_water %in% c(1, 2, 3, 4, 5, 6), 0, 1)) %>% 
+  mutate(residence_type = case_when(hh_residencetype == 1 ~ "residence_permanent",
+                                    hh_residencetype == 2 ~ "residence_recent_migrant",
+                                    hh_residencetype == 3 ~ "residence_returnee",
+                                    hh_residencetype == 4 ~ "residence_idp",
+                                    hh_residencetype == 5 ~ "residence_refugee",
+                                  TRUE ~ NA_character_)) %>% 
+  mutate(hoh_education = case_when(hh_education == 1 ~ "edu_none",
+                                   hh_education == 2 ~ "edu_primary",
+                                   hh_education == 3 ~ "edu_secondary",
+                                   hh_education == 4 ~ "edu_higher",
+                                   hh_education == 5 ~ "edu_religious",
+                                   TRUE ~ NA_character_)) %>%
+  mutate(housing_type = case_when(hh_residencetype == 1 ~ "apartment", 
+                                  hh_residencetype == 2 ~ "bungalow_brick_house", 
+                                  hh_residencetype == 3 ~ "semi_pucca", 
+                                  hh_residencetype == 4 ~ "wooden_house", 
+                                  hh_residencetype == 5 ~ "bamboo_house", 
+                                  hh_residencetype == 6 ~ "hut_2_3_years", 
+                                  hh_residencetype == 7 ~ "hut_1_year", 
+                                  hh_residencetype == 8 ~ "tent", 
+                                  hh_residencetype == 9 ~ "substandard_shelter", 
+                                  hh_residencetype == 10 ~ "no_shelter", 
+                                  hh_residencetype == 11 ~ "other", 
+                                  TRUE ~ NA_character_)) %>% 
+  mutate_at(vars(hh_age, incomechangereduced, meals, hh_agricactivity),
+            ~ case_when(. == 5 ~ NA_real_,
+                       . == 6 ~ NA_real_,
+                       TRUE ~ .)) %>%
+  mutate(hoh_age = case_when(hh_age == 1 ~ "age_under18",
+                             hh_age == 2 ~ "age_18_40",
+                             hh_age == 3 ~ "age_41_65",
+                             hh_age == 4 ~ "age_over65",
+                             TRUE ~ NA_character_)) %>% 
+  mutate(meals_inv = case_when(meals == 4 ~ 1, 
+                             meals == 3 ~ 2,
+                             meals == 2 ~ 3, 
+                             meals == 1 ~ 4,
+                             TRUE ~ meals),
+       meals_inv = range_wna(meals_inv)) %>% 
+  mutate(income_reduced = case_when(incomechangereduced == 4 ~ 1,
+                                    incomechangereduced == 3 ~ 2,
+                                    incomechangereduced == 2 ~ 3, 
+                                    incomechangereduced == 1 ~ 4,
+                                    TRUE ~ incomechangereduced),
+         income_reduced = range_wna(income_reduced)) %>% 
+   # you've changed all the NAs in agriactivity to 0
+  mutate(agri_activity = case_when(hh_agricactivity %in% c(1, 2, 3) ~ 1, 
+                                       TRUE ~ 0)) %>%
+  mutate_at(vars(fies_ranout_hhs, fies_hungry_hhs, fies_whlday_hhs),
+                ~ case_when(. == 4 ~ NA_real_,
+                           . == 5 ~ NA_real_,
+                           TRUE ~ .)) %>% 
+      mutate_at(vars(fies_hungry_hhs, fies_ranout_hhs, fies_whlday_hhs),
+                ~ case_when(. == 3 ~ 1, 
+                           . == 2 ~ 0.5, 
+                           . == 1 ~ 0.25, 
+                           TRUE ~ .)) %>%
+  mutate(expensefood30d = case_when(expense_food30d == 11 ~ NA_real_, 
+                                        expense_food30d == 12 ~ NA_real_,
+                                        TRUE ~ expense_food30d)) %>%
+  mutate(expense_food = expensefood30d / 10) %>%
+  mutate(hhfcs = fcs_stap * 2 + fcs_pulse * 3 + fcs_veg + fcs_fruit + fcs_pr * 4 + 
+           fcs_dairy * 4 + fcs_fat * .5 + fcs_sugar * .5, 
+         hhfcs_inv = range_wna(112 - hhfcs),
+         fcs_borderline_poor = ifelse(hhfcs <= 35, 1, 0)) %>% 
+  mutate_at(vars(fcs_stap, fcs_pulse, fcs_dairy, fcs_pr, fcs_veg, fcs_fruit, fcs_fat, fcs_sugar),
+                ~ range_wna(7 - .)) %>% 
+  
+  # joining in the income list
+
+  left_join(income_main %>%  select(income_main_text = income_main_source, income_main), 
+            by = "income_main") %>% 
+  left_join(income_main, by = "income_main") %>%
+  mutate(count = ifelse(!is.na(income_main_source), 1, 0)) %>%
+  pivot_wider(names_from = income_main_source, values_from = count, values_fill = 0) %>%
+  
+  mutate(rural = case_when(rural_urban == 1 ~ 1, 
+                           rural_urban == 2 ~ 0, 
+                           TRUE ~ NA_real_)) %>% 
+  mutate(shocks_none = shock_noshock,
+         shocks_lostwork = shock_lostemplorwork, 
+         shocks_sicknessdeath = shock_sicknessordeathofhh, 
+         shocks_foodprices = shock_higherfoodprices, 
+         shocks_conflict = shock_violenceinsecconf, 
+         shocks_cantworkbusiness = shock_cantworkordobusiness, 
+         shocks_naturalhazard = ifelse(shock_flood > 0 | 
+                                         shock_drought > 0 | 
+                                         shock_hurricane > 0 | 
+                                         shock_landslides > 0 |
+                                         shock_firenatural > 0 | 
+                                         shock_othernathazard > 0 |
+                                         shock_coldtemporhail > 0, 
+                                       1, 0),
+         shocks_accessmarket = shock_napasture, 
+         shocks_pricesother = ifelse(shock_higheragrinputprice > 0 | 
+                                       shock_higherfuelprices > 0 | 
+                                       shock_othereconomicshock > 0 | 
+                                       shock_lowoutputprice > 0, 
+                                     1, 0), 
+         shocks_other = ifelse(shock_othercropandlivests > 0 | 
+                                 shock_otherintrahhshock > 0 | 
+                                 shock_othermanmadehazard > 0 |
+                                 shock_animaldisease > 0 | 
+                                 shock_pestoutbreak > 0 | 
+                                 shock_plantdisease > 0 | 
+                                 shock_othercropandlivests > 0 | 
+                                 shock_otherintrahhshock > 0 | 
+                                 shock_theftofprodassets > 0 , 
+                               1, 0)) %>% 
+  mutate(needs_food = ifelse(need_food > 0, 1, 0),
+         needs_cash = ifelse(need_cashassistance > 0, 1, 0),
+         needs_fuel = ifelse(need_fuel > 0, 1, 0), 
+         needs_medical = ifelse(need_medicalsupplyhealth > 0, 1, 0),
+         needs_agri = ifelse(need_fertilizers > 0 | 
+                               need_pesticides > 0 | 
+                               need_techsupporextensionserv > 0 |
+                               need_acstomechanisedequipprod > 0|
+                               need_accesstoland > 0 | 
+                               need_seeds > 0 | 
+                               need_landrehabilitation > 0 | 
+                               need_accesstoirrigationwater > 0 | 
+                               need_supportforprocessprod > 0, 1, 0),
+         needs_jobsloans = ifelse(need_loans > 0 | need_job > 0, 
+                                  1, 0), 
+         needs_livestock_fish = ifelse(need_restockinganimals > 0 | 
+                                         need_veterinaryservices > 0 | 
+                                         need_animalfeed > 0 |
+                                         need_animalsalemingarantdprice > 0 |
+                                         need_supptransofanimalsorprod > 0 |
+                                         need_fishequiorothersuppforfish > 0, 
+                                1, 0),
+         needs_other = ifelse(need_shelter > 0 | 
+                                need_washsanitationdrinkingwater > 0 | 
+                                need_educationsupport > 0 |  
+                                need_infoonsafetymeasures > 0 | 
+                                need_marketingsupport > 0 | 
+                                need_other > 0 |
+                                need_storageequipmentorfaci > 0 | 
+                                need_tools > 0 | 
+                                need_specialnutritionfood > 0 | 
+                                need_washsanitationdrinkingwater > 0, 1, 0)) %>% 
+  replace_na(list(needs_food = 0, needs_cash = 0, needs_medical = 0, needs_agri = 0, 
+                  needs_jobsloans = 0, needs_other = 0)) %>%
+  select(-c(adm3_ayeyarwady, adm3_chin, adm3_kachin, adm3_kayah, adm3_kayah, adm3_kayin,
+            adm3_rakhine, adm3_shan, adm3_shan, adm3_yangon, adm3_mon)) %>%  
+  select(-matches("crp_|ls_|fish_|otherspecify")) %>% 
+  mutate(food_expenses = tot_income * expense_food30d,
+         food_expenses_per_capita = food_expenses / hh_size / 3, 
+         meb_pc = food_expenses_per_capita / (190555 / 5)) %>% 
+  mutate(agri_hhd = ifelse(income_main_text %in% c("ims_farmer_staple",
+                                                      "ims_farmer_veg_fruit",
+                                                      "ims_farmer_cash_crops",
+                                                      "ims_fish_livestock", 
+                                                      "ims_fish_livestock", 
+                                                      "ims_casual_ag", 
+                                                      "ims_stable_ag"), 1, 0)) %>% 
+  rename(children_0_4 = hh_size04, 
+         children_0_15 = hh_size5_15, 
+         adults_16_59 = hh_size16_59, 
+         elderly_60plus = hh_size60) %>% 
+  mutate(csi_weighted = (cs_crisis_sold_prod_assets + cs_crisis_no_school + cs_crisis_reduced_health_exp) * 0.5 + 
+           (cs_emergency_sold_house + cs_emergency_hh_migration + cs_emergency_hh_risk) * 1,
+         csi_weighted = range_wna(csi_weighted)) %>% 
+   mutate(
+    edu_higher = ifelse(hoh_education == "edu_higher", 1, 0),
+    edu_none = ifelse(hoh_education == "ed_none", 1, 0),
+    edu_primary = ifelse(hoh_education == "edu_primary", 1, 0),
+    edu_secondary = ifelse(hoh_education == "edu_secondary", 1, 0),
+    edu_religious = ifelse(hoh_education ==  "edu_religious", 1, 0)) %>% 
+  mutate(hh_debt = ifelse(hh_debt_yn == 1, 1, 0), 
+         hh_debt_more = ifelse(hh_debt_more %in% c(3, 1), 1, 0))
+   
+  
+
+
+
+
+```
+
+
+```{r}
+# food insecurity score
+fs_share <- survey3 %>%  
+  select(survey_id, hhfcs_inv, fies_raw_range, csi_weighted) %>% 
+  mutate_at(vars(hhfcs_inv, fies_raw_range, csi_weighted), scale) %>% 
+  mutate_at(vars(hhfcs_inv, fies_raw_range, csi_weighted), range_wna) %>% 
+  mdepriv(c("hhfcs_inv", "fies_raw_range", "csi_weighted"), method = "bv", output ="all")
+   
+
+survey3 <- survey3 %>%
+  left_join(fs_share$data %>% 
+              select(fs_score = score_i, survey_id), by = "survey_id") %>% 
+  mutate(priority = case_when(hhfcs_inv >= quantile(hhfcs_inv, probs = 0.75) & 
+                                 fies_raw_range >= quantile(fies_raw_range, probs = 0.75) ~ 1, 
+                               hhfcs_inv >= quantile(hhfcs_inv, probs = 0.75) & 
+                                 csi_weighted >= quantile(csi_weighted, probs = 0.75) ~ 1,
+                              fies_raw_range >= quantile(fies_raw_range, probs = 0.75) & 
+                                 csi_weighted >= quantile(csi_weighted, probs = 0.75) ~ 1, 
+                               TRUE ~ 0)) 
+
+survey3 %>%
+  write_csv("./data/survey3.csv")
+
+
+
+```
+
+

@@ -1,7 +1,7 @@
 ---
 title: "Township Prioritisation and Establishing a Beneficiary Profile"
 author: "Myanmar Food Security Cluster"
-date: "25/03/2022"
+date: "25/05/2022"
 output: 
   html_document:
     code_download: true
@@ -123,9 +123,9 @@ mode <- function(x) {
 # show_col(viridis_pal(option = "cividis")(10))
 ```
 
-```{r df-pcodes-shapefiles}
+```{r datasets}
 # pcodes
-pcodes <- read_excel("Myanmar PCodes Release_9.3_Jan2021_(StRgn_Dist_Tsp_Town_Ward_VT).xlsx",
+pcodes <- read_excel("./data/Myanmar PCodes Release_9.3_Jan2021_(StRgn_Dist_Tsp_Town_Ward_VT).xlsx",
                      sheet = "03_Township") %>%
   rename(admin1_pcode = SR_Pcode,
          state = SR_Name_Eng,
@@ -147,501 +147,29 @@ pcode1_shape <- st_read("./mmr_polbnda2_adm1_mimu_250k/mmr_polbnda2_adm1_mimu_25
  rename(state = ST, 
         admin1_pcode = ST_PCODE) %>% st_as_sf()
 
-```
-
-```{r df-fsc-vulmmr-acled}
 # reading in 5Ws 2021
-fsc_2021 <- read_csv("fsc5w_2021.csv")
+fsc_2021 <- read_csv("./data/fsc5w_2021.csv")
 
 # 2022 Q1 5Ws
-fsc <- read_csv("fsc_q1_2022.csv")
+fsc <- read_csv("./data/fsc_q1_2022.csv")
 
 # reading in vulnerability dataset
-vulmmr <- read_excel("Datasets_Vulnerability_Analysis_in_Myanmar_09Jul2018 (1).xlsx",
-           skip = 1) %>% 
-  slice(-c(1:3)) %>% 
-  clean_names() %>% 
-  select(-label) %>% 
-  mutate_at(vars(number_of_village_tracts:wb_wealth_rank), as.numeric) %>% 
-  mutate_at(vars(disasters_impacted_by_nargis_2008:acled_2015_2016_data_exists), as.logical) %>% 
-  mutate_at(vars(conflict_2015_2016_number_of_battles:corrected_conflict_index_garry), as.numeric) %>% 
-  select(-starts_with("x")) %>% 
-  select(-c(private_sector_development_2014_2015, protection_2010_2015, shelter_2010_2015, wash_2010_2015))
-
+vulmmr <- read_csv("./data/vulmmr.csv")
 
 # ACLED dataset
-acled <- read_csv("acled_new.csv") %>% 
+acled <- read_csv("./data/acled_new.csv") %>% 
   mutate(has_village = if_else(location != admin3, "yes", "no"))
-```
 
-```{r df-fs-pin-and-dependencies}
 # reading in conflict score
-conflict_score <- read_csv("conflict_score2.csv")
+conflict_score <- read_csv("./data/conflict_score2.csv")
 
 # show_col(viridis_pal()(10))
 
-floods_storm_surge <- read_excel("Flood_Affected_Township_(2008-2021) (1).xlsx") %>% 
-  clean_names() %>% 
-  rename(state = st, township = ts, admin1_pcode = st_pcode, admin3_pcode = ts_pcode) %>% 
-  mutate(year_2008_storm_surge = ifelse(!is.na(storm_surg), 1, 0)) %>%
-  mutate(year_2008 = ifelse(str_detect(flood_year, "2008"), 1, 0),
-         year_2009 = ifelse(str_detect(flood_year, "2009"), 1, 0),
-         year_2010 = ifelse(str_detect(flood_year, "2010"), 1, 0),
-         year_2011 = ifelse(str_detect(flood_year, "2011"), 1, 0),
-         year_2012 = ifelse(str_detect(flood_year, "2012"), 1, 0),
-         year_2013 = ifelse(str_detect(flood_year, "2013"), 1, 0),
-         year_2014 = ifelse(str_detect(flood_year, "2014"), 1, 0),
-         year_2015 = ifelse(str_detect(flood_year, "2015"), 1, 0),
-         year_2016 = ifelse(str_detect(flood_year, "2016"), 1, 0),
-         year_2017 = ifelse(str_detect(flood_year, "2017"), 1, 0),
-         year_2018 = ifelse(str_detect(flood_year, "2018"), 1, 0),
-         year_2019 = ifelse(str_detect(flood_year, "2019"), 1, 0),
-         year_2020 = ifelse(str_detect(flood_year, "2020"), 1, 0),
-         year_2021 = ifelse(str_detect(flood_year, "2021"), 1, 0)) %>%
-  rename(floodyears = flood_year) %>% 
-  mutate(
-    flood_prob = select(., starts_with("year_")) %>% rowMeans(na.rm = TRUE),
-    flood_count = select(., starts_with("year_")) %>% rowSums(na.rm = TRUE))
+floods_storm_surge <- read_csv("./data/floods_storm_surge.csv")
 
-# We can try again later, but I don't think we need the vul_score
-# Since we are going in a different direction 
-vul_share <- vulmmr %>% select(avg_safe_sanitation_improved_drinking_water:female_literacy_percent_literate, 
-                  child_dependency_ratio_31, unpaid_family_worker_percent,
-                  admin3_pcode = township_pcode) %>% 
-  left_join(conflict_score %>% select(conflict_score, admin3_pcode), by = "admin3_pcode") %>% 
-  select(-conflict_index_c_percent_of_max_inverse_percent_of_average_of_envelopes_12, 
-         -unpaid_family_workers_inverse, -child_dependency_ratio_inverse) %>% 
-  mutate_at(vars(avg_safe_sanitation_improved_drinking_water:female_literacy_percent_literate), ~ 1 - .x) %>%
-  mutate(conflict_env = range_wna(conflict_score)) %>%
-  filter(!is.na(admin3_pcode)) %>%  
-  replace(is.na(.), 0) %>% 
-  mdepriv(c("avg_safe_sanitation_improved_drinking_water", "average_good_roof_and_wall", 
-            "highest_education_at_least_middle_school_percent_14", "electricity_for_lighting_percent_15", 
-            "id_card_with_id_total_percent_16", "female_literacy_percent_literate", 
-            "child_dependency_ratio_31", "unpaid_family_worker_percent", "conflict_env"), 
-          method = "cz", output = "all", 
-          score_i_heading = "vul_score")
+fs_pin <- read_csv("./data/fs_pin.csv")
 
-# main township-level dataset
-fs_pin <- read_excel("hpc_pin.xlsx") %>%  
-  left_join(fsc %>% group_by(admin3_pcode_old) %>% 
-              summarise(beneficiaries = sum(new_beneficiaries)),
-            by = c("admin3_pcode" = "admin3_pcode_old")) %>% 
-  left_join(conflict_score %>% select(admin3_pcode, battles, explosions_remote_violence, protests_and_riots, 
-                                      strategic_developments, violence_against_civilians, 
-                                      conflict_score, fatalities),
-            by = "admin3_pcode") %>% 
-  left_join(vulmmr %>% select(admin3_pcode = township_pcode, 
-                              admin2_pcode = district_pcode, total_population_2015 = total_pop_both_sexes,  
-                     area_sown_acres = all_area_sowed_mali, population_density, vulnerability_band, 
-                     old_conflict_score = conflict_index_a_average_of_percent_of_totals,
-                     old_conflict_env = conflict_index_b_average_of_envelopes,
-                     approximate_vulnerable_population ),
-            by = "admin3_pcode") %>% 
-  left_join(floods_storm_surge %>% 
-              select(admin3_pcode, flood_prob, flood_count),
-            by = "admin3_pcode") %>% 
-  left_join(fsc_2021 %>%
-              filter(unique_beneficiaries == "Yes") %>%
-              group_by(admin3_pcode) %>%
-              summarise(beneficiaries_2021 = sum(beneficiaries),
-                        partners_2021 = n_distinct(org_code)),
-            by = "admin3_pcode") %>% 
-  mutate(fs_pin = ifelse(fs_pin > population_2021_proj, population_2021_proj, fs_pin)) %>% 
-  replace_na(list(conflict_score = 0, beneficiaries = 0, beneficiaries_2021 = 0, partners_2021 = 0, flood_prob = 0)) %>% 
-  mutate(conflict_ranking = dense_rank(desc(conflict_score)),
-         flood_ranking = dense_rank(desc(flood_prob)),
-         fs_pin_ranking = dense_rank(desc(fs_pin)),
-         fs_target_ranking = dense_rank(desc(fs_targeted)),
-         fs_pin_pc = fs_pin / sum(fs_pin),
-         pin_pop = fs_pin / population_2021_proj) %>% 
-  mutate(old_group = case_when(conflict_score >= mean(conflict_score) & population_density >= 1000 ~ "A1",
-                           conflict_score >= mean(conflict_score) & population_density < 1000 ~ "A2",
-                           conflict_score < mean(conflict_score) & population_density >= 1000 ~ "B1",
-                           conflict_score < mean(conflict_score) & population_density < 1000 ~ "B2")) %>% 
-  mutate(band_text = case_when(vulnerability_band == 1 ~ "1. Extreme outliers, underdevelopment and conflict", 
-                               vulnerability_band == 2 ~ "2. Conflict-affected, poor human development", 
-                               vulnerability_band == 3 ~ "3. Hubs in conflict-affected areas", 
-                               vulnerability_band == 4 ~ "4. Very low access to services and infrastructure", 
-                               vulnerability_band == 5 ~ "5. Agricultural areas with high profits", 
-                               vulnerability_band == 6 ~ "6. Secondary cities/towns in agricultural areas", 
-                               vulnerability_band == 7 ~ "7. Up-and-coming peri-urban and urban areas", 
-                               vulnerability_band == 8 ~ "8. Affluent, urban core")) %>% 
-  left_join(vul_share$data %>%  select(-conflict_score), by = "admin3_pcode") %>%
-  mutate(mdp_score_old = (avg_safe_sanitation_improved_drinking_water + average_good_roof_and_wall + 
-           highest_education_at_least_middle_school_percent_14 + electricity_for_lighting_percent_15 + 
-           id_card_with_id_total_percent_16 + female_literacy_percent_literate + 
-           child_dependency_ratio_31 + unpaid_family_worker_percent) / 8) %>% 
-  ungroup()
-
-# 2019 intercensal district-level values
-district_ref <- fs_pin %>%  
-  select(state, admin2_pcode, admin3_pcode, total_population_2015,
-         avg_safe_sanitation_improved_drinking_water:unpaid_family_worker_percent) %>% 
-  group_by(admin2_pcode) %>% 
-  mutate_at(vars(avg_safe_sanitation_improved_drinking_water:unpaid_family_worker_percent), 
-            ~ .x * total_population_2015) %>% 
-  relocate(total_population_2015, .after = unpaid_family_worker_percent) %>% 
-  summarise(across(avg_safe_sanitation_improved_drinking_water:total_population_2015, ~sum(.))) %>% 
-  mutate_at(vars(avg_safe_sanitation_improved_drinking_water:unpaid_family_worker_percent), 
-            ~ .x / total_population_2015) %>% 
-  left_join(
-    read_excel(
-      "Dataset_Climate, Environmental Degradation and Disaster Risk in Myanmar_May2022.xlsx",
-      skip = 2,
-      sheet = "2016-21 Vulnerability"
-    ) %>%
-      slice(-1) %>%
-      clean_names() %>%
-      select(-label) %>%  
-  rename(state = state_region_name, admin1_pcode = state_region_pcode, 
-         district = district_name, admin2_pcode = district_pcode) %>%
-      select(admin2_pcode, avg_safe_sanitation_improved_drinking_water_21:female_literacy_percent_literate_29) %>% 
-      select(-conflict_index_c_percent_of_max_inverse_percent_of_average_of_envelopes_23) %>% 
-      na.omit() %>% 
-      mutate_at(vars(avg_safe_sanitation_improved_drinking_water_21:female_literacy_percent_literate_29), ~ as.numeric(.x)) %>% 
-      mutate_at(vars(avg_safe_sanitation_improved_drinking_water_21:female_literacy_percent_literate_29), ~ 1 - .x), 
-    by = "admin2_pcode") %>% 
-  select(admin2_pcode, 
-         d_water_2015 = avg_safe_sanitation_improved_drinking_water, 
-         d_house_2015 = average_good_roof_and_wall, 
-         d_electricity_2015 = electricity_for_lighting_percent_15, 
-         d_literacy_2015 = female_literacy_percent_literate, 
-         d_child_2015 = child_dependency_ratio_31, 
-         d_unpaid_2015 = unpaid_family_worker_percent, 
-         d_water_2019 = avg_safe_sanitation_improved_drinking_water_21, 
-         d_house_2019 = average_good_roof_and_wall_22  , 
-         d_electricity_2019 = electricity_for_lighting_percent_26, 
-         d_literacy_2019 = female_literacy_percent_literate_29, 
-         d_child_2019 = child_dependency_ratio_inverse_28, 
-         d_unpaid_2019 = unpaid_family_workers_inverse_24) 
-
-# write it back into fs_pin 
-fs_pin <- fs_pin %>% 
-  left_join(district_ref, by = "admin2_pcode") %>% 
-  mutate(water_2019 = ifelse(!is.na(d_water_2019),
-                                 avg_safe_sanitation_improved_drinking_water / d_water_2015 * d_water_2019, 
-                                 avg_safe_sanitation_improved_drinking_water), 
-         house_2019 = ifelse(!is.na(d_house_2019), 
-                                 average_good_roof_and_wall / d_house_2015 * d_water_2019, 
-                                 average_good_roof_and_wall), 
-         edu_2019 = highest_education_at_least_middle_school_percent_14, 
-         electricity_2019 = ifelse(!is.na(d_electricity_2019),
-                                       electricity_for_lighting_percent_15 / d_electricity_2015 * d_electricity_2019, 
-                                       electricity_for_lighting_percent_15), 
-         id_card_2019 = id_card_with_id_total_percent_16, 
-         female_literacy_2019 = ifelse(!is.na(d_literacy_2019), 
-                                       female_literacy_percent_literate / d_literacy_2015 * d_literacy_2019,
-                                       female_literacy_percent_literate), 
-         child_dependency_2019 = ifelse(!is.na(d_child_2019), 
-                                        child_dependency_ratio_31 / d_child_2015 * d_child_2019, 
-                                        child_dependency_ratio_31), 
-         unpaid_2019 = ifelse(!is.na(d_unpaid_2019),
-                              unpaid_family_worker_percent / d_unpaid_2015 * d_unpaid_2019, 
-                              unpaid_family_worker_percent)) %>% 
-  mutate(mdp_adjust = (water_2019 + house_2019 + edu_2019 + electricity_2019 + 
-                       id_card_2019 + female_literacy_2019 + child_dependency_2019 + unpaid_2019) / 8) %>% 
-  ungroup()
-
-# k-means clustering and output
-set.seed(123)
-
-km_res2 <- fs_pin %>% 
-  replace_na(list(fatalities = 0)) %>% 
-  select(population_density, conflict_score, mdp_adjust, fatalities) %>%
-  mutate_at(vars(population_density, conflict_score, mdp_adjust, fatalities), ~ range_wna(.x)) %>% 
-  kmeans(5, nstart = 25)
-
-# reading it back into fs_pin
-fs_pin <- fs_pin %>% 
-  cbind(cluster = km_res2$cluster) %>% 
-  mutate(cluster = recode(cluster, 
-                          `1` = "A1",`4` = "A2", 
-                          `2` = "B", `3` = "C", `5` = "D"))
-
-```
-
-
-```{r df-fao-wfp-survey}
-
-# should i just read in the whole survey dataset here? or just read in the csv
-# i don't really know if people are interested in the cleaning process
-
-fao_survey <- read_dta("MMR_R2HQ_cleanedWt_final.dta") %>% 
-  zap_labels()
-
-survey <- fao_survey %>% 
-  rename(admin3_pcode = adm3_pcode) %>% 
-  left_join(pcodes %>% select(admin3_pcode, township, state, admin1_pcode, district, admin2_pcode),
-            by = "admin3_pcode") %>% 
-  mutate_at(vars(cs_stress_hh_assets:cs_emergency_hh_risk), 
-            ~case_when(. == 4 ~ NA_real_,
-                       TRUE ~ .)) %>% 
-  mutate_at(vars(cs_stress_hh_assets:cs_emergency_hh_risk), 
-            ~case_when(. == 1 ~ 1,
-                       . == 2 ~ 0, 
-                       . == 1 ~ 1, 
-                       TRUE ~ 0)) %>%
-  mutate(lhcsi_max = case_when(lhcsi_max_ag == "None" ~ 0,
-                                        lhcsi_max_ag == "Stress" ~ 1,
-                                        lhcsi_max_ag == "Crisis" ~ 2,
-                                        lhcsi_max_ag == "Emergency" ~ 3),
-                  lhcsi_range = range01(lhcsi_max)) %>%
-  mutate(csi_weighted = (cs_crisis_sold_prod_assets + cs_crisis_no_school + cs_crisis_reduced_health_exp) * 0.5 + 
-           (cs_emergency_sold_house + cs_emergency_hh_migration + cs_emergency_hh_risk) * 1,
-         csi_weighted = range_wna(csi_weighted)) %>% 
-  mutate_at(vars(hh_gender, fewfood, skipped, whlday, hungry, ateless, healthy, runout, worried, 
-                 crp_salesdif, accessmarket, need, crp_proddif, cropdifficultyunrest, cropsalesdifficultyunrest), 
-            ~case_when(. == 3 ~ NA_real_, 
-                       . == 4 ~ NA_real_, 
-                       TRUE ~ .)) %>% 
-  mutate(hoh_female = case_when(hh_gender == 1 ~ 0, 
-                                hh_gender == 2 ~ 1,
-                                TRUE ~ hh_gender)) %>%
-  mutate_at(vars(fies_fewfood = fewfood, fies_skipped = skipped, 
-                 fies_whlday = whlday, fies_hungry = hungry,
-                 fies_ateless = ateless, fies_healthy = healthy,
-                 fies_runout = runout, fies_worried = worried,
-                 accessmarket, need, crp_salesdif, crp_proddif,
-                 cropdifficultyunrest, cropsalesdifficultyunrest),
-            ~case_when(. == 1 ~ 1, 
-                       . == 2 ~ 0, 
-                       TRUE ~ 0)) %>%
-  mutate(no_accessmarket = ifelse(accessmarket == 1, 0, 1)) %>% 
-  # be careful here -- you've imputed missing fies data as 0
-  # this is the fies raw score, not sure if i need any additional transformations at the hhd level
-  mutate(fies_raw = fies_fewfood + fies_skipped + fies_whlday + fies_hungry +
-           fies_ateless + fies_healthy + fies_runout + fies_worried, 
-         fies_raw_range = range_wna(fies_raw)) %>% 
-  mutate_at(vars(hh_wealth_toilet, hh_residencetype, hh_education,
-                 income_main_comp, income_sec_comp, income_third_comp, 
-                 crp_area_change, crp_harv_change, crp_salesprice),
-            ~case_when(. == 6 ~ NA_real_,
-                       . == 7 ~ NA_real_, 
-                       TRUE ~ .)) %>% 
-  mutate_at(vars(income_main_comp, income_sec_comp, income_third_comp, 
-                 crp_area_change, crp_harv_change, crp_salesprice),
-            ~range_wna(.)) %>%   
-  mutate(not_improved_sanitation = case_when(hh_wealth_toilet == 1 ~ 0,
-                                                       hh_wealth_toilet == 2 ~ 0,
-                                                       hh_wealth_toilet == 3 ~ 1,
-                                                       hh_wealth_toilet == 4 ~ 1,
-                                                       hh_wealth_toilet == 5 ~ 1)) %>% 
-  mutate(residence_type = case_when(hh_residencetype == 1 ~ "residence_permanent",
-                                    hh_residencetype == 2 ~ "residence_recent_migrant",
-                                    hh_residencetype == 3 ~ "residence_returnee",
-                                    hh_residencetype == 4 ~ "residence_idp",
-                                    hh_residencetype == 5 ~ "residence_refugee",
-                                  TRUE ~ NA_character_)) %>% 
-  mutate(hoh_education = case_when(hh_education == 1 ~ "edu_none",
-                                   hh_education == 2 ~ "edu_primary",
-                                   hh_education == 3 ~ "edu_secondary",
-                                   hh_education == 4 ~ "edu_higher",
-                                   hh_education == 5 ~ "edu_religious",
-                                   TRUE ~ NA_character_)) %>%
-  mutate_at(vars(hh_age, incomechangereduced, wheremigration, meals, hh_agricactivity),
-            ~case_when(. == 5 ~ NA_real_,
-                       . == 6 ~ NA_real_,
-                       TRUE ~ .)) %>% 
-  mutate(hoh_age = case_when(hh_age == 1 ~ "age_under18",
-                             hh_age == 2 ~ "age_18_40",
-                             hh_age == 3 ~ "age_41_65",
-                             hh_age == 4 ~ "age_over65",
-                             TRUE ~ NA_character_)) %>% 
-    mutate(meals_inv = case_when(meals == 4 ~ 1, 
-                               meals == 3 ~ 2,
-                               meals == 2 ~ 3, 
-                               meals == 1 ~ 4,
-                               TRUE ~ meals),
-         meals_inv = range_wna(meals_inv)) %>% 
-  mutate(income_reduced = case_when(incomechangereduced == 4 ~ 1,
-                                    incomechangereduced == 3 ~ 2,
-                                    incomechangereduced == 2 ~ 3, 
-                                    incomechangereduced == 1 ~ 4,
-                                    TRUE ~ incomechangereduced),
-         income_reduced = range_wna(income_reduced)) %>% 
-  # you've changed all the NAs in agriactivity to 0
-  mutate(agri_activity = case_when(hh_agricactivity %in% c(1, 2, 3) ~ 1, 
-                                       TRUE ~ 0)) %>%
-  # fies indicators     
-  mutate_at(vars(fies_ranout_hhs, fies_hungry_hhs, fies_whlday_hhs),
-                ~case_when(. == 4 ~ NA_real_,
-                           . == 5 ~ NA_real_,
-                           TRUE ~ .)) %>% 
-      mutate_at(vars(fies_hungry_hhs, fies_ranout_hhs, fies_whlday_hhs),
-                ~case_when(. == 3 ~ 1, 
-                           . == 2 ~ 0.5, 
-                           . == 1 ~ 0.25, 
-                           TRUE ~ .)) %>%
-  mutate(expensefood30d = case_when(expensefood30d == 11 ~ NA_real_, 
-                                        expensefood30d == 12 ~ NA_real_,
-                                        TRUE ~ expensefood30d)) %>% 
-      mutate(expense_food = expensefood30d / 10) %>%
-      # fcs indicators
-  mutate(hhfcs_inv = 112 - HHFCS,
-         hhfcs_inv = range_wna(hhfcs_inv),
-         fcs_borderline_poor = ifelse(HHFCS <= 35, 1, 0)) %>%
-  mutate_at(vars(fcsstap, fcspulse, fcsdairy, fcspr, fcsveg, fcsfruit, fcsfat, fcssugar),
-                ~ range_wna(7 - .)) %>%
-  rename_with(str_replace, pattern = "fcs", replacement = "fcs_", matches("fcs")) %>%  
-  rename(fcs_protein = fcs_pr, fcs_staple = fcs_stap, hhfcs_inv = hhfcs__inv, 
-         fcs_borderline_poor = fcs__borderline_poor) %>% 
-  mutate(income_source = case_when(income_main %in% c(1, 2, 3, 7, 8, 9, 10) ~ "income_ms_agriculture",
-                                   income_main == 4 ~ "income_ms_livestock",
-                                   income_main == 5 ~ "income_ms_fisheries",
-                                   income_main %in% c(11, 13, 14) ~ "income_ms_stable_non_ag",
-                                   income_main %in% c(6, 12) ~ "income_ms_casual_non_ag",
-                                   income_main %in% c(15, 16, 17, 18) ~ "income_ms_selfem_nonwork",
-                                   income_main %in% c(19, 20) ~ "income_ms_no_income", 
-                                   TRUE ~ "income_ms_stable_non_ag")) %>%
-  left_join(fao_survey %>% 
-              mutate(income_source = case_when(income_main %in% c(1, 2, 3, 7, 8, 9, 10) ~ "income_ms_agriculture",
-                                   income_main == 4 ~ "income_ms_livestock",
-                                   income_main == 5 ~ "income_ms_fisheries",
-                                   income_main %in% c(11, 13, 14) ~ "income_ms_stable_non_ag",
-                                   income_main %in% c(6, 12) ~ "income_ms_casual_non_ag",
-                                   income_main %in% c(15, 16, 17, 18) ~ "income_ms_selfem_nonwork",
-                                   income_main %in% c(19, 20) ~ "income_ms_no_income", 
-                                   TRUE ~ "income_ms_stable_non_ag")) %>%
-              select(survey_id, income_source) %>%
-              mutate(value = 1) %>%
-              pivot_wider(names_from = income_source, values_from = value, values_fill = 0),
-            by = "survey_id") %>% 
-      # imputed income_main_group value -- look at the "maybe_later" below to see how it was done
-      mutate(rural = ifelse(ruralurban == 1, 1, 0)) %>% 
-      # imputed hoh sex -- mode
-      mutate(hoh_female = ifelse(is.na(hoh_female), 0, hoh_female)) %>% 
-      # imputed fies_ranout_hhs -- mode
-      mutate(fies_ranout_hhs = ifelse(is.na(fies_ranout_hhs), 1, fies_ranout_hhs)) %>%  
-  mutate(shocks_none = shock_noshock,
-         shocks_lostwork = shock_lostemplorwork, 
-         shocks_sicknessdeath = shock_sicknessordeathofhh, 
-         shocks_foodprices = shock_higherfoodprices, 
-         shocks_conflict = shock_violenceinsecconf, 
-         shocks_cantworkbusiness = shock_cantworkordobusiness, 
-         shocks_naturalhazard = ifelse(shock_flood > 0 | shock_drought > 0 | shock_hurricane > 0 | shock_landslides > 0 |
-                                         shock_firenatural > 0 | shock_othernathazard > 0 |
-                                         shock_coldtemporhail > 0, 1, 0),
-         shocks_accessmarket = shock_napasture, 
-         shocks_pricesother = ifelse(shock_higheragrinputprice > 0 | shock_higherfuelprices > 0 | 
-                                       shock_othereconomicshock > 0 | shock_lowoutputprice > 0, 1, 0), 
-         shocks_other = ifelse(shock_othercropandlivests > 0 | shock_otherintrahhshock > 0 | shock_othermanmadehazard > 0 |
-                                 shock_animaldisease > 0 | shock_pestoutbreak > 0 | shock_plantdisease > 0 | 
-                                 shock_othercropandlivests > 0 | shock_otherintrahhshock > 0 | shock_theftofprodassets > 0 , 
-                               1, 0)) %>% 
-  replace_na(list(income_main_amount = 0, income_sec_amount = 0, income_third_amount = 0)) %>% 
-  mutate(income_total_amount = income_main_amount + income_sec_amount + income_third_amount,
-         food_expenses_mmk = income_total_amount * expense_food, 
-         income_per_capita = income_total_amount / hh_size) %>%
-  mutate(needs_food = ifelse(need_food > 0, 1, 0),
-         needs_cash = ifelse(need_cashassistance > 0, 1, 0),
-         needs_medical = ifelse(need_medicalservicesupply > 0, 1, 0),
-         needs_agri = ifelse(need_fertilizers > 0 | need_pesticides > 0 | need_techsupporextensionserv > 0 |
-                               need_acstomechanisedequipprod > 0|
-                               need_accesstoland > 0 | need_seeds > 0 | need_landrehabilitation > 0 | 
-                               need_accesstoirrigationwater > 0 | need_supportforprocessprod > 0 |
-                               need_agrilabour, 1, 0),
-         needs_jobsloans = ifelse(need_loans > 0 | need_jobopportunity > 0, 1, 0),
-         needs_other = ifelse(need_clothesshelterwater > 0 | need_educationassistance > 0 | need_fishequiorothersuppfor > 0 |
-                                need_infoonsafetymeasures > 0 | need_marketingsupport > 0 | need_other > 0 |
-                                need_storageequipmentorfaci > 0 | need_tools > 0 | 
-                                need_restockinganimals > 0 | need_veterinaryservices > 0 | need_animalfeed > 0 |
-                                need_animalsalemingarantdprice > 0 | need_supptransofanimalsorprod > 0 |
-                                need_specialnutritionfood > 0, 1, 0)) %>% 
-  replace_na(list(needs_food = 0, needs_cash = 0, needs_medical = 0, needs_agri = 0, 
-                  needs_jobsloans = 0, needs_other = 0)) %>% 
-  select(-c(shock_otherspecify, covid_otherspecify,shock_ref, covid_ref, shock_dk, covid_dk, 
-            crp_proddif_otherspecify, crp_saledif_otherspecify, ls_num_inc_dec_otherspecify, 
-            ls_food_supply_otherspecify, ls_proddif_otherspecify, need_dk, need_otherspecify,
-            ls_salesdif_otherspecify, fish_saledif_otherspecify, reasonsmigration_otherspecify,
-            adm3_ayeyarwady, adm3_chin, adm3_kachin, adm3_kayah, adm3_kayah, adm3_kayin,
-            adm3_rakhine, adm3_shan_east, adm3_shan_north, adm3_yangon, adm3_mon)) %>%  
-  mutate(food_expenses_per_capita = food_expenses_mmk / hh_size / 3, 
-         meb_pc = food_expenses_per_capita / (190555 / 5)) %>% 
-  
-  mutate(agri_hhd = ifelse(income_ms_agriculture == 1 | income_ms_fisheries == 1 | income_ms_livestock == 1 |
-                                      agri_activity == 1 | income_sec <= 10, 1, 0),
-         agri_main = ifelse(income_ms_agriculture == 1 | income_ms_fisheries == 1 |
-                              income_ms_fisheries == 1 | agri_activity == 1, 1, 0)) %>% 
-  rename(children_0_4 = hhsize04)
-
-# fs_score mdepriv
-fs_share <- survey %>%  
-  select(survey_id, hhfcs_inv, fies_raw, csi_weighted) %>% 
-  mutate_at(vars(hhfcs_inv, fies_raw, csi_weighted), scale) %>% 
-  mutate_at(vars(hhfcs_inv, fies_raw, csi_weighted), range_wna) %>% 
-  mdepriv(c("hhfcs_inv", "fies_raw", "csi_weighted"), method = "bv", output ="all")
-
-# fs_score3 mdepriv
-fs_share2 <- survey %>% 
-  mutate_at(vars(cs_crisis_sold_prod_assets, cs_crisis_no_school, cs_crisis_reduced_health_exp), ~ . * 0.5) %>% 
-  select(survey_id, fcs_staple, fcs_pulse, fcs_dairy, fcs_protein, fcs_veg, fcs_fruit, fcs_fat, fcs_sugar, 
-         cs_crisis_sold_prod_assets, cs_crisis_no_school, cs_crisis_reduced_health_exp, 
-         cs_emergency_sold_house, cs_emergency_hh_migration, cs_emergency_hh_risk,
-         fies_fewfood, fies_skipped, fies_whlday, fies_hungry, fies_ateless, fies_healthy,
-                 fies_runout, fies_worried) %>% 
-  mdepriv(c("fcs_staple", "fcs_pulse", "fcs_dairy", "fcs_protein", "fcs_veg", "fcs_fruit", "fcs_fat", "fcs_sugar", 
-         "cs_crisis_sold_prod_assets", "cs_crisis_no_school", "cs_crisis_reduced_health_exp", 
-         "cs_emergency_sold_house", "cs_emergency_hh_migration", "cs_emergency_hh_risk",
-         "fies_fewfood", "fies_skipped", "fies_whlday", "fies_hungry", "fies_ateless", "fies_healthy",
-         "fies_runout", "fies_worried"), output = "all")
-
-fs_share3 <- survey %>% 
-  mutate_at(vars(cs_crisis_sold_prod_assets, cs_crisis_no_school, cs_crisis_reduced_health_exp), ~ . * 0.5) %>% 
-  select(survey_id, fcs_staple, fcs_pulse, fcs_dairy, fcs_protein, fcs_veg, fcs_fruit, fcs_fat, fcs_sugar, 
-         cs_crisis_sold_prod_assets, cs_crisis_no_school, cs_crisis_reduced_health_exp, 
-         cs_emergency_sold_house, cs_emergency_hh_migration, cs_emergency_hh_risk,
-         fies_fewfood, fies_skipped, fies_whlday, fies_hungry, fies_ateless, fies_healthy,
-                 fies_runout, fies_worried, combined_wt) %>% 
-  mdepriv(c("fcs_staple", "fcs_pulse", "fcs_dairy", "fcs_protein", "fcs_veg", "fcs_fruit", "fcs_fat", "fcs_sugar", 
-         "cs_crisis_sold_prod_assets", "cs_crisis_no_school", "cs_crisis_reduced_health_exp", 
-         "cs_emergency_sold_house", "cs_emergency_hh_migration", "cs_emergency_hh_risk",
-         "fies_fewfood", "fies_skipped", "fies_whlday", "fies_hungry", "fies_ateless", "fies_healthy",
-         "fies_runout", "fies_worried"), output = "all", sampling_weights = "combined_wt")
-
-fs_share4 <- survey %>% 
-  mutate_at(vars(cs_crisis_sold_prod_assets, cs_crisis_no_school, cs_crisis_reduced_health_exp), ~ . * 0.5) %>% 
-  select(survey_id, hhfcs_inv, 
-         cs_crisis_sold_prod_assets, cs_crisis_no_school, cs_crisis_reduced_health_exp, 
-         cs_emergency_sold_house, cs_emergency_hh_migration, cs_emergency_hh_risk,
-         fies_fewfood, fies_skipped, fies_whlday, fies_hungry, fies_ateless, fies_healthy,
-                 fies_runout, fies_worried, combined_wt) %>% 
-  mdepriv(c("hhfcs_inv", 
-         "cs_crisis_sold_prod_assets", "cs_crisis_no_school", "cs_crisis_reduced_health_exp", 
-         "cs_emergency_sold_house", "cs_emergency_hh_migration", "cs_emergency_hh_risk",
-         "fies_fewfood", "fies_skipped", "fies_whlday", "fies_hungry", "fies_ateless", "fies_healthy",
-         "fies_runout", "fies_worried"), output = "all", sampling_weights = "combined_wt")
-
-# priority scores
-survey <- survey %>%
-  left_join(fs_share$data %>% 
-              select(score_i, survey_id), by = "survey_id") %>% 
-  left_join(fs_share2$data %>% 
-              select(fs_score2 = score_i, survey_id), by = "survey_id") %>% 
-  left_join(fs_share3$data %>% 
-              select(fs_score3 = score_i, survey_id), by = "survey_id") %>% 
-  left_join(fs_share4$data %>%  
-              select(fs_score4 = score_i, survey_id), by = "survey_id") %>% 
-   mutate(priority1 = case_when(hhfcs_inv >= mean(hhfcs_inv) & 
-                                    fies_raw_range >= mean(fies_raw_range) & csi_weighted >= mean(csi_weighted) ~ 1,
-                               TRUE ~ 0)) %>%
-  mutate(priority2 = ifelse(score_i >= mean(score_i), 1, 0)) %>% 
-  mutate(priority3 = case_when(hhfcs_inv >= mean(hhfcs_inv) & fies_raw_range >= mean(fies_raw_range) ~ 1, 
-                               hhfcs_inv >= mean(hhfcs_inv) & csi_weighted >= mean(csi_weighted) ~ 1, 
-                               fies_raw_range >= mean(fies_raw_range) & csi_weighted >= mean(csi_weighted) ~ 1, 
-                               TRUE ~ 0)) %>% 
-  mutate(priority = case_when(hhfcs_inv >= quantile(hhfcs_inv, probs = 0.75) & 
-                                 fies_raw_range >= quantile(fies_raw_range, probs = 0.75) ~ 1, 
-                               hhfcs_inv >= quantile(hhfcs_inv, probs = 0.75) & 
-                                 csi_weighted >= quantile(csi_weighted, probs = 0.75) ~ 1,
-                              fies_raw_range >= quantile(fies_raw_range, probs = 0.75) & 
-                                 csi_weighted >= quantile(csi_weighted, probs = 0.75) ~ 1, 
-                               TRUE ~ 0)) %>% 
-  mutate(priority5 = case_when(hhfcs_inv >= quantile(hhfcs_inv, probs = 0.75) ~ 1, 
-                               fies_raw_range >= quantile(fies_raw_range, probs = 0.75) ~ 1,
-                               csi_weighted >= quantile(csi_weighted, probs = 0.75) ~ 1, 
-                               TRUE ~ 0)) %>% 
-  rename(fs_score = score_i)
+survey <- read_csv("./data/survey.csv")
 
 # survey long
 survey_long <- survey %>%
@@ -664,13 +192,28 @@ survey_long <- survey %>%
 ```
 
 
+```{r}
+survey %>% 
+  group_by(state) %>%  
+  summarise(conflict = mean(shocks_conflict), 
+            count = n(), 
+            weight = sum(combined_wt)) %>% 
+  mutate(pc_weight = weight / sum(weight)) %>% 
+  mutate_at(vars(conflict, pc_weight), ~ round(.x * 100, digits = 2)) %>% 
+  select(-weight) %>% 
+  arrange(desc(conflict))
+```
+
+
+
 ## Introduction 
 
 Prioritisation can largely be broken into two steps -- geographic prioritisation and beneficiary selection. 
 
 This document examines data from the FAO-WFP Shocks, Agricultural Livelihoods and Food Security Survey, the Armed Conflict Location and Event Dataset (ACLED) and the Myanmar Information Management Unit (MIMU). 
 
-The first section deals with the development of a beneficiary profile using the FAO-WFP survey data to inform beneficiary selection. The second section makes use of ACLED data for Myanmar to develop a conflict score for township prioritisation. Township and beneficiary selection criteria are linked by a decision tree. The third section presents flood risks by township -- these are only probabilities and serve as references for prepositioning and disaster risk reduction. They not included in the overall prioritisation process, though this might change if disasters occur. This document is closed by a section on technical notes. 
+The first section deals with the development of a beneficiary profile using the FAO-WFP survey data to inform beneficiary selection. The second section makes use of ACLED data for Myanmar to develop a conflict score for township prioritisation. 
+The third section presents flood risks by township -- these are only probabilities and serve as references for prepositioning and disaster risk reduction. They not included in the overall prioritisation process, though this might change if disasters occur. This document is closed by a section on technical notes. 
 
 <br>
 
@@ -749,7 +292,7 @@ survey_long %>%
   lm_prep_long() %>% 
   mutate(fs_score4 = log(fs_score4)) %>% 
   mutate(fs_score4 = ifelse(is.infinite(fs_score4), 0, fs_score4)) %>% 
-  lm(fs_score4 ~ ., data = .) %>% 
+  lm(fs_score4 ~ . -1, data = .) %>% 
   plot_coef() + 
   labs(title = "Food insecurity score") + 
   
@@ -757,7 +300,7 @@ survey_long %>%
         filter(str_detect(var, "shocks_|hoh_|rural|expense_food|not_improved|agri_activity|income_ms_|edu_|size|children|disability") |
          var %in% c("csi_weighted", "expense_food")) %>%
   lm_prep_long() %>%
-  lm(csi_weighted ~ ., data = .) %>%
+  lm(csi_weighted ~ . - 1, data = .) %>%
   plot_coef() + 
   labs(title = "Coping strategies index") + 
   
@@ -765,7 +308,7 @@ survey_long %>%
   filter(str_detect(var, "shocks_|hoh_|rural|expense_food|not_improved|agri_activity|income_ms_|edu_|size|children|disability") |
            var %in% c("hhfcs_inv", "expense_food")) %>%
   lm_prep_long() %>%
-  lm(hhfcs_inv ~ ., data = .) %>%
+  lm(hhfcs_inv ~ . - 1, data = .) %>%
   plot_coef() + 
   labs(title = "Food consumption score") + 
 
@@ -773,7 +316,7 @@ survey_long %>%
   filter(str_detect(var, "shocks_|hoh_|rural|expense_food|not_improved|agri_activity|income_ms_|edu_|size|children|disability") |
            var %in% c("fies_raw_range", "expense_food")) %>%
   lm_prep_long() %>%
-  lm(fies_raw_range ~ ., data = .) %>%
+  lm(fies_raw_range ~ . - 1, data = .) %>%
   plot_coef() + 
   labs(title = "Food insecurity experience scale")
 ```
@@ -1190,6 +733,8 @@ Whilst there is no set threshold whereby one can state that everyone in a given 
 
 Myanmar had the most conflict events out of any country in 2021, exceeding Syria, Yemen and Afghanistan. 
 
+The table below highlights the fourteenfold increase in conflict events and thirteenfold increase in conflict fatalities in Myanmar in 2021 compared to the average for the prior decade. 
+
 <br>
 
 ```{r table-conflict-years-compare}
@@ -1219,6 +764,111 @@ acled %>%
 Given the more than fourteenfold increase in conflict events and thirteenfold increase in conflict fatalities in Myanmar in 2021 (compared to the average for the preceding 10 years), conflict will be major part of determining which areas have the greatest humanitarian needs. However, scoring townships based only on one variable would lead to a very uni-dimensional understanding of the crisis. 
 
 Similar to how a beneficiary profile was established in order to inform beneficiary selection, this section, will focus on what variables should be considered when prioritising amongst the various geographic areas in Myanmar and how the results of such a prioritisation should be applied. As with earlier sections, the analysis here is meant to describe and inform programmatic and operational decision making, as opposed to dictating it, as each partner will have their own considerations and limitations. 
+
+The plot below shows the cumulative number of conflict events, broken down by the 9 most common sub-event types. 
+
+<br>
+
+```{r sub-event-type, fig.height = 6}
+acled %>%
+  filter(year >= 2021) %>% 
+  mutate(sub_event_type = fct_lump(sub_event_type, 9)) %>% 
+  mutate(month = floor_date(event_date, "month")) %>% 
+  mutate(month = map(month, ~ seq.Date(as.Date(.), as.Date("2022/05/01"), by = "month"))) %>% 
+  unnest(month) %>% 
+  group_by(month, sub_event_type) %>%
+  summarise(events = n()) %>% 
+  ggplot(aes(x = month, y = events, group = sub_event_type, fill = sub_event_type)) + 
+  geom_area() + 
+  scale_x_date(date_breaks = "1 month", labels = date_format(format = "%Y-%b")) + 
+  scale_y_continuous(breaks = seq(0, 22000, by = 2000), labels = comma) +
+  scale_fill_viridis_d(option = "turbo") + 
+  theme(legend.position = "top",
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1), 
+        plot.caption = element_text(hjust = .5)) + 
+  labs(x = "", 
+       y = "Cumulative conflict events", 
+       title = "Cumualtive 2021-2022 conflict events per month, by sub-event type", 
+       caption = "Data source: Armed Conflict Location & Event Data Project (ACLED); acleddata.com") 
+  
+```
+
+<br>
+
+This plot below breaks down fatalities over time by sub-event type. 
+
+
+```{r fatalities, fig.height = 6}
+acled %>%
+  filter(year >= 2021) %>% 
+  mutate(sub_event_type = ifelse(
+    sub_event_type %out% c("Armed clash", "Remote explosive/landmine/IED", "Attack", 
+                           "Excessive force against protesters", "Shelling/artillery/missile attack", 
+                           "Violent demonstration", "Air/drone strike	"), "Other", sub_event_type
+  )) %>% 
+  mutate(month = floor_date(event_date, "month")) %>% 
+  mutate(month = map(month, ~ seq.Date(as.Date(.), as.Date("2022/05/01"), by = "month"))) %>% 
+  unnest(month) %>% 
+  group_by(month, sub_event_type) %>%
+  summarise_at("fatalities", sum) %>% 
+  ggplot(aes(x = month, y = fatalities, group = sub_event_type, fill = sub_event_type)) + 
+  geom_area() + 
+  scale_x_date(date_breaks = "1 month", labels = date_format(format = "%Y-%b")) + 
+  scale_y_continuous(breaks = seq(0, 22000, by = 2000), labels = comma) +
+  scale_fill_viridis_d(option = "inferno") + 
+  theme(legend.position = "top",
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1), 
+        plot.caption = element_text(hjust = .5)) + 
+  labs(x = "", 
+       y = "Cumulative fatalities", 
+       title = "Cumualtive 2021-2022 conflict-fatalities per month, by sub-event type", 
+       caption = "Data source: Armed Conflict Location & Event Data Project (ACLED); acleddata.com")
+```
+
+<br>
+
+And the ratio of peaceful protests versus non-peaceful incidents over time. Whilst peaceful protests are far from their peak in Februrary 2021 of 1582 events or 85% of the monthly total, as of May 2022, they still remained at 12% of all conflict events or 149 events. 
+
+
+```{r peaceful-protests, fig.height = 6}
+acled %>%
+  filter(year >= 2021) %>%
+  mutate(peaceful_protest = ifelse(sub_event_type == "Peaceful protest", "yes", "no")) %>% 
+  group_by(event_date, peaceful_protest) %>% 
+  summarise(events = n()) %>% 
+  ggplot(aes(x = event_date, y = events, fill = peaceful_protest, group = peaceful_protest)) +
+  geom_area(size = 1) +
+  scale_x_date(date_breaks = "1 month", labels = date_format(format = "%Y-%b")) +
+  labs(x = "", 
+       y = "Number of conflict events", 
+       title = "Ratio of peaceful protests to non-peaceful incidents", 
+       subtitle = "1 Jan 2021 - 31 May 2022", 
+       caption = "Data source: Armed Conflict Location & Event Data Project (ACLED); acleddata.com") + 
+  theme(legend.position = "top",
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1), 
+        plot.caption = element_text(hjust = .5))
+  
+```
+
+
+```{r peaceful-protests-ref, eval=FALSE}
+acled %>%
+  filter(year >= 2021) %>% 
+  mutate(peaceful_protest = ifelse(sub_event_type == "Peaceful protest", "yes", "no")) %>% 
+  mutate(month = month(event_date)) %>% 
+  group_by(month, year, peaceful_protest) %>% 
+  summarise(events = n()) %>% 
+  pivot_wider(names_from = peaceful_protest, values_from = events) %>% 
+  mutate(pc_yes = yes / (yes + no))
+
+```
+
+
+
+
+
+
+
 
 For a more comprehensive review of conflict in Myanmar, please refer to the Food Security Cluster's report [Understanding Conflict Dynamics in Myanmar through Conflict and Incident Data: A Food Security Perspective](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/). And for a more comprehensive review of multidimensional vulnerabilty in Myanmar, please refer to MIMU-HARP's [Vulnerability Study](http://themimu.info/sites/themimu.info/files/documents/Report_Vulnerability_in_Myanmar_HARP-MIMU_Jun2018_ENG_Print_version.pdf).  
 
@@ -1284,6 +934,32 @@ conflict_score %>%
 # ggsave("fatalities_state.png", dpi = 300, height = 5, width = 8, units = "in")
   
 ```
+
+```{r}
+acled %>%
+  filter(year >= 2021) %>% 
+  mutate(sub_event_type = fct_lump(sub_event_type, 9)) %>%
+  mutate(month = floor_date(event_date, "month")) %>% 
+  mutate(month = map(month, ~ seq.Date(as.Date(.), as.Date("2022/05/01"), by = "month"))) %>% 
+  unnest(month) %>% 
+  group_by(event_date, sub_event_type) %>%
+  group_by(month, sub_event_type) %>%
+  summarise(events = n(), .groups = "drop") %>% 
+  ggplot(aes(x = month, y = events, fill = sub_event_type, group = sub_event_type)) + 
+  geom_area()  +
+  scale_x_date(date_breaks = "1 month", labels = date_format(format = "%Y-%b")) +
+  scale_y_continuous(labels = comma, breaks = seq(0, 22000, by = 2000)) + 
+  theme(legend.position = "top", 
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1)) +
+  labs(x = "",
+       y = "Cumulative conflict events", 
+       title = "Cumulative 2021-2022 conflict events per month, by event type",
+       subtitle = "Data source: Armed Conflict Location & Event Data Project (ACLED); acleddata.com", 
+       fill = "")
+```
+
+
+
 
 <br><br>
 
