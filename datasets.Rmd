@@ -152,16 +152,19 @@ fs_pin <- read_excel("./data/hpc_pin.xlsx") %>%
   left_join(fsc %>% group_by(admin3_pcode_old) %>% 
               summarise(beneficiaries = sum(new_beneficiaries)),
             by = c("admin3_pcode" = "admin3_pcode_old")) %>% 
-  left_join(conflict_score %>% select(admin3_pcode, battles, explosions_remote_violence, protests_and_riots, 
-                                      strategic_developments, violence_against_civilians, 
-                                      conflict_score, fatalities),
+  left_join(conflict_score %>% 
+              select(admin3_pcode, battles, explosions_remote_violence, 
+                     protests_and_riots, strategic_developments,
+                     violence_against_civilians, conflict_score, fatalities),
             by = "admin3_pcode") %>% 
   left_join(vulmmr %>% select(admin3_pcode = township_pcode, 
-                              admin2_pcode = district_pcode, total_population_2015 = total_pop_both_sexes,  
-                     area_sown_acres = all_area_sowed_mali, population_density, vulnerability_band, 
-                     old_conflict_score = conflict_index_a_average_of_percent_of_totals,
-                     old_conflict_env = conflict_index_b_average_of_envelopes,
-                     approximate_vulnerable_population ),
+                              admin2_pcode = district_pcode, 
+                              total_population_2015 = total_pop_both_sexes,
+                              area_sown_acres = all_area_sowed_mali, 
+                              population_density, vulnerability_band,
+                              old_conflict_score = conflict_index_a_average_of_percent_of_totals,
+                              old_conflict_env = conflict_index_b_average_of_envelopes,
+                              approximate_vulnerable_population),
             by = "admin3_pcode") %>% 
   left_join(floods_storm_surge %>% 
               select(admin3_pcode, flood_prob, flood_count),
@@ -180,18 +183,20 @@ fs_pin <- read_excel("./data/hpc_pin.xlsx") %>%
          fs_target_ranking = dense_rank(desc(fs_targeted)),
          fs_pin_pc = fs_pin / sum(fs_pin),
          pin_pop = fs_pin / population_2021_proj) %>% 
-  mutate(old_group = case_when(conflict_score >= mean(conflict_score) & population_density >= 1000 ~ "A1",
-                           conflict_score >= mean(conflict_score) & population_density < 1000 ~ "A2",
-                           conflict_score < mean(conflict_score) & population_density >= 1000 ~ "B1",
-                           conflict_score < mean(conflict_score) & population_density < 1000 ~ "B2")) %>% 
-  mutate(band_text = case_when(vulnerability_band == 1 ~ "1. Extreme outliers, underdevelopment and conflict", 
-                               vulnerability_band == 2 ~ "2. Conflict-affected, poor human development", 
-                               vulnerability_band == 3 ~ "3. Hubs in conflict-affected areas", 
-                               vulnerability_band == 4 ~ "4. Very low access to services and infrastructure", 
-                               vulnerability_band == 5 ~ "5. Agricultural areas with high profits", 
-                               vulnerability_band == 6 ~ "6. Secondary cities/towns in agricultural areas", 
-                               vulnerability_band == 7 ~ "7. Up-and-coming peri-urban and urban areas", 
-                               vulnerability_band == 8 ~ "8. Affluent, urban core")) %>% 
+  mutate(old_group = case_when(
+    conflict_score >= mean(conflict_score) & population_density >= 1000 ~ "A1",
+    conflict_score >= mean(conflict_score) & population_density < 1000 ~ "A2",
+    conflict_score < mean(conflict_score) & population_density >= 1000 ~ "B1",
+    conflict_score < mean(conflict_score) & population_density < 1000 ~ "B2")) %>% 
+  mutate(band_text = case_when(
+    vulnerability_band == 1 ~ "1. Extreme outliers, underdevelopment and conflict",
+    vulnerability_band == 2 ~ "2. Conflict-affected, poor human development",
+    vulnerability_band == 3 ~ "3. Hubs in conflict-affected areas",
+    vulnerability_band == 4 ~ "4. Very low access to services and infrastructure",
+    vulnerability_band == 5 ~ "5. Agricultural areas with high profits",
+    vulnerability_band == 6 ~ "6. Secondary cities/towns in agricultural areas",
+    vulnerability_band == 7 ~ "7. Up-and-coming peri-urban and urban areas",
+    vulnerability_band == 8 ~ "8. Affluent, urban core")) %>% 
   left_join(vul_share$data %>%  select(-conflict_score), by = "admin3_pcode") %>%
   mutate(mdp_score_old = (avg_safe_sanitation_improved_drinking_water + average_good_roof_and_wall + 
            highest_education_at_least_middle_school_percent_14 + electricity_for_lighting_percent_15 + 
@@ -250,32 +255,40 @@ district_ref <- fs_pin %>%
 
 ### Writing the 2019 updates right back into fs_pin
 
+
 ```{r}
 # write it back into fs_pin 
 fs_pin <- fs_pin %>% 
   left_join(district_ref, by = "admin2_pcode") %>% 
-  mutate(water_2019 = ifelse(!is.na(d_water_2019),
-                                 avg_safe_sanitation_improved_drinking_water / d_water_2015 * d_water_2019, 
-                                 avg_safe_sanitation_improved_drinking_water), 
-         house_2019 = ifelse(!is.na(d_house_2019), 
-                                 average_good_roof_and_wall / d_house_2015 * d_water_2019, 
-                                 average_good_roof_and_wall), 
+  mutate(water_2019 = ifelse(
+    !is.na(d_water_2019),
+    avg_safe_sanitation_improved_drinking_water / d_water_2015 * d_water_2019,
+    avg_safe_sanitation_improved_drinking_water), 
+         house_2019 = ifelse(
+           !is.na(d_house_2019),
+           average_good_roof_and_wall / d_house_2015 * d_water_2019,
+           average_good_roof_and_wall), 
          edu_2019 = highest_education_at_least_middle_school_percent_14, 
-         electricity_2019 = ifelse(!is.na(d_electricity_2019),
-                                       electricity_for_lighting_percent_15 / d_electricity_2015 * d_electricity_2019, 
-                                       electricity_for_lighting_percent_15), 
+         electricity_2019 = ifelse(
+           !is.na(d_electricity_2019),
+           electricity_for_lighting_percent_15 / d_electricity_2015 * d_electricity_2019,
+           electricity_for_lighting_percent_15), 
          id_card_2019 = id_card_with_id_total_percent_16, 
-         female_literacy_2019 = ifelse(!is.na(d_literacy_2019), 
-                                       female_literacy_percent_literate / d_literacy_2015 * d_literacy_2019,
-                                       female_literacy_percent_literate), 
-         child_dependency_2019 = ifelse(!is.na(d_child_2019), 
-                                        child_dependency_ratio_31 / d_child_2015 * d_child_2019, 
-                                        child_dependency_ratio_31), 
-         unpaid_2019 = ifelse(!is.na(d_unpaid_2019),
-                              unpaid_family_worker_percent / d_unpaid_2015 * d_unpaid_2019, 
-                              unpaid_family_worker_percent)) %>% 
-  mutate(mdp_adjust = (water_2019 + house_2019 + edu_2019 + electricity_2019 + 
-                       id_card_2019 + female_literacy_2019 + child_dependency_2019 + unpaid_2019) / 8) %>% 
+         female_literacy_2019 = ifelse(
+           !is.na(d_literacy_2019),
+           female_literacy_percent_literate / d_literacy_2015 * d_literacy_2019,
+           female_literacy_percent_literate), 
+         child_dependency_2019 = ifelse(
+           !is.na(d_child_2019),
+           child_dependency_ratio_31 / d_child_2015 * d_child_2019,
+           child_dependency_ratio_31), 
+         unpaid_2019 = ifelse(
+           !is.na(d_unpaid_2019),
+           unpaid_family_worker_percent / d_unpaid_2015 * d_unpaid_2019,
+           unpaid_family_worker_percent)) %>% 
+  mutate(mdp_adjust = (water_2019 + house_2019 + edu_2019 + 
+                         electricity_2019 + id_card_2019 + 
+                         female_literacy_2019 + child_dependency_2019 + unpaid_2019) / 8) %>% 
   ungroup()
 
 ```
@@ -302,6 +315,83 @@ fs_pin <- fs_pin %>%
 fs_pin %>%
   write_csv("./data/fs_pin.csv")
 
+```
+
+
+```{r}
+fs_pin %>% glimpse()
+
+fs_pin %>%
+  mutate(conflict_events = battles + explosions_remote_violence +  protests_and_riots + strategic_developments + violence_against_civilians) %>% 
+  select(state, admin1_pcode, township, admin3_pcode, total_population_2021proj = population_2021_proj, 
+         food_security_pin_2022 = fs_pin, food_security_target_2022 = fs_targeted, 
+         conflict_events, battles, explosions_remote_violence, protests_and_riots, strategic_developments, violence_against_civilians,
+         fatalities, conflict_score, flood_count, flood_prob, conflict_ranking, flood_ranking, vul_score_2019 = mdp_adjust, 
+         unsafe_water_2019 = water_2019, poor_housing_2019 = house_2019, no_middle_school_2019 = edu_2019,
+         no_electricity_2019 =  electricity_2019, no_id_card_2019 = id_card_2019, female_illiteracy_2019 = female_literacy_2019, 
+         child_dependency_2019) %>% 
+  write_csv("township_indicators.csv")
+
+fs_pin %>% 
+  select(state, admin1_pcode, township, admin3_pcode,
+         total_population_2021proj = population_2021_proj, 
+         food_security_pin_2022 = fs_pin, food_security_target_2022 = fs_targeted, 
+         beneficiaries_2022 = beneficiaries) %>% 
+  write_csv("township_indicators_small.csv")
+```
+
+### Alternative clustering with flood risk 
+
+```{r}
+# k-means clustering and output
+set.seed(123)
+
+km_res3 <- fs_pin %>% 
+  replace_na(list(fatalities = 0)) %>% 
+  select(population_density, conflict_score, mdp_adjust, fatalities, flood_prob) %>%
+  mutate_at(vars(population_density, conflict_score, mdp_adjust, fatalities), ~ range_wna(.x)) %>% 
+  kmeans(6, nstart = 25)
+
+# reading it back into fs_pin
+fs_pin <- fs_pin %>% 
+  cbind(cluster3 = km_res3$cluster) 
+
+fs_pin %>%
+  write_csv("./data/fs_pin.csv")
+
+```
+
+```{r}
+reverselog_trans <- function(base = exp(1)) {
+    trans <- function(x) -log(x, base)
+    inv <- function(x) base^(-x)
+    trans_new(paste0("reverselog-", format(base)), trans, inv, 
+              log_breaks(base = base), 
+              domain = c(1e-100, Inf))
+}
+
+fs_pin %>%  
+  ggplot(aes(x = mdp_adjust, y = conflict_score)) + 
+  geom_point(aes(colour = cluster3, size = population_2021_proj), alpha = .8) + 
+  guides(colour = "none", size = "none") +
+  labs(x = "Multidimensional vulnerability (2019)", y = "Conflict score (2021)") + 
+  scale_colour_viridis(option = "cividis") + 
+  
+fs_pin %>% 
+  ggplot(aes(x = population_density, y = conflict_score)) + 
+  geom_point(aes(colour = cluster3, size = population_2021_proj), alpha = .8) + 
+  scale_x_continuous(trans = reverselog_trans(10), breaks = c(0, 1, 10, 100, 1000, 10000), 
+                     labels = comma_format(accuracy = 1)) + 
+  scale_size_continuous(labels = comma) + 
+  labs(size = "population", 
+       x = "Persons per km2 (reversed)", y = "Conflict score (2021)") + 
+  scale_colour_viridis(option = "cividis") + 
+
+  plot_layout(widths = 1) + 
+  plot_annotation(title = "Comparison between vulnerability, population density and conflict score", 
+                  subtitle = "Higher vulnerabilty and conflict scores indicate more vulnerability and conflict", 
+                  caption = "Data source: ACLED (acleddata.com) and MIMU", 
+                  theme = theme(plot.caption = element_text(hjust = .5)))
 ```
 
 ## Survey
@@ -632,3 +722,16 @@ survey_long <- survey %>%
 
 ```
 
+
+
+```{r}
+mimu <- read_csv("./data/datavalue_Union.csv", skip = 1) %>% clean_names()
+
+mimu %>% glimpse()
+
+mimu %>% pivot_longer(cols = c(-source_name, -indicator_name, -indicator_type, -unit), 
+                      names_to = "year", values_to = "value") %>% 
+  mutate(year = str_remove(year, "x")) %>%
+  
+  count(year)
+```

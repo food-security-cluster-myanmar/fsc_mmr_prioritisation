@@ -33,10 +33,18 @@ fao_survey3 <- read_dta("./data/FAO_WFP_HHsurvey_Rd3_CleanedMMR.dta") %>%
 ```
 
 ```{r}
+survey %>% select(matches("market"))
+```
+
+
+
+### Income main 
+
+```{r}
 income_main <- tribble(~income_main, ~income_main_source, ~main_sub_groups,
-        1, "ims_farmer_staple", "Farmer / Production and sale of staple crops",
-        2, "ims_farmer_veg_fruit", "Farmer / Production and sale of vegetable or fruit", 
-        3, "ims_farmer_cash_crops", "Farmer / Production and sale of cashcrops",
+        1, "ims_farmer", "Farmer / Production and sale of staple crops",
+        2, "ims_farmer", "Farmer / Production and sale of vegetable or fruit", 
+        3, "ims_farmer", "Farmer / Production and sale of cashcrops",
         4, "ims_fish_livestock", "Farmer / Production and sale of livestock and livestock products",
         5, "ims_fish_livestock", "Farmer / Production and sale of fish",
         6, "ims_other","main_Collection and sale of forestry or bush products", 
@@ -48,8 +56,8 @@ income_main <- tribble(~income_main, ~income_main_source, ~main_sub_groups,
         12, "ims_casual_non_ag", "main_Off-farm daily wages and other non-agricultural casual employment", 
         13, "ims_stable_non_ag", "main_Stable employment in non-agricultural sector", 
         14, "ims_public_em", "main_Public employment", 
-        15, "ims_other", "main_Income not derived from work / Charity", 
-        16, "ims_other", "main_Income not derived from work / Welfare transfer / pension / humanitarian aid", 
+        15, "ims_no_income", "main_Income not derived from work / Charity", 
+        16, "ims_no_income", "main_Income not derived from work / Welfare transfer / pension / humanitarian aid", 
         17, "ims_other", "main_Income not derived from work / Remittances", 
         18, "ims_other", "main_Income not derived from work / Income from other rents", 
         19, "ims_no_income", "main_No income source in the last 3 months and used exclusively savings", 
@@ -277,6 +285,7 @@ survey3 <- fao_survey3 %>%
 
 ```
 
+# Food insecurity scores
 
 ```{r}
 # food insecurity score

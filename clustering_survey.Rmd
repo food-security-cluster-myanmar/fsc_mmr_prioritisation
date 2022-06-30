@@ -18,10 +18,16 @@ library(pander)
 library(vip)
 library(patchwork)
 library(janitor)
+library(rpart)
+library(rpart.utils)
+library(rattle)
+library(rpart.plot)
 
 # scaling functions 
 range01 <- function(x){(x-min(x))/(max(x)-min(x))}
 range_wna <- function(x){(x-min(x, na.rm = TRUE))/(max(x, na.rm = TRUE)-min(x, na.rm = TRUE))}
+
+`%out%` <- Negate(`%in%`)
 
 theme_set(theme_minimal())
 
@@ -38,11 +44,55 @@ Housing types not relevant -- More than 3200 of the responses were apartment or 
 
 ### Survey
 
+Round 3
+
 ```{r}
 survey <- read_csv("./data/survey3.csv")
 
 set.seed(456)
 ```
+
+Round 2
+```{r}
+survey2 <- read_csv("./data/survey.csv")
+```
+
+
+Comparison with Round 2
+```{r}
+rbind(
+survey2 %>% 
+  group_by(state) %>% 
+  summarise(count = n()) %>% 
+  mutate(state = case_when(str_detect(state, "Shan") ~ "Shan", 
+                           str_detect(state, "Bago") ~ "Bago", 
+                           TRUE ~ state)) %>% 
+  mutate(round = 2), 
+
+survey %>% group_by(state = adm1_name_en) %>% 
+  summarise(count = n()) %>%  
+  mutate(round = 3)
+) %>%
+  mutate(round = as.factor(round)) %>% 
+  ggplot(aes(x = state, y = count, fill = round)) + 
+  geom_col(position = position_dodge()) +
+  scale_fill_manual(values = c("goldenrod", "navyblue")) + 
+  # theme(axis.text.x = element_text(angle = 60)) + 
+  labs(x = "", y = "Households", 
+       title = "Number of households surveyed by FAO/WFP, rounds 2 and 3") 
+
+survey_long %>%  
+  filter(str_detect(var, "shocks_|hoh_|rural|expense_food|not_improved|agri_activity|income_ms_|edu_|size|children|disability") |
+           var %in% c("fs_score4", "expense_food")) %>% 
+  lm_prep_long() %>% 
+  mutate(fs_score4 = log(fs_score4)) %>% 
+  mutate(fs_score4 = ifelse(is.infinite(fs_score4), 0, fs_score4)) %>% 
+  lm(fs_score4 ~ . -1, data = .) %>% 
+  plot_coef() + 
+  labs(title = "Food insecurity score") 
+
+```
+
 
 ```{r}
 survey_debt <- survey %>% 
@@ -84,8 +134,52 @@ survey_debt <- survey %>%
   select(matches("why_|from_"), survey_id, -matches("migration"), 
          -debt_borrow_why_text, -debt_borrow_from_text)
 
-
+income_main <- tribble(~income_main, ~income_main_source, ~main_sub_groups,
+        1, "ims_farmer_staple", "Farmer / Production and sale of staple crops",
+        2, "ims_farmer_veg_fruit", "Farmer / Production and sale of vegetable or fruit", 
+        3, "ims_farmer_cash_crops", "Farmer / Production and sale of cashcrops",
+        4, "ims_fish_livestock", "Farmer / Production and sale of livestock and livestock products",
+        5, "ims_fish_livestock", "Farmer / Production and sale of fish",
+        6, "ims_other","main_Collection and sale of forestry or bush products", 
+        7, "ims_other","main_Informal agricultural trade EXCLUDING producers", 
+        8, "ims_other","main_Formal agricultural trade EXCLUDING producers", 
+        9, "ims_casual_ag", "main_Daily wage on farms and other casual employment in agricultural sector", 
+        10, "ims_stable_ag", "main_Stable employment in agricultural sector", 
+        11, "ims_prof_self_em",  "main_Non-agricultural self-employed or liberal profession / doctor / architect / lawyer / including restaurant",
+        12, "ims_casual_non_ag", "main_Off-farm daily wages and other non-agricultural casual employment", 
+        13, "ims_stable_non_ag", "main_Stable employment in non-agricultural sector", 
+        14, "ims_public_em", "main_Public employment", 
+        15, "ims_other", "main_Income not derived from work / Charity", 
+        16, "ims_other", "main_Income not derived from work / Welfare transfer / pension / humanitarian aid", 
+        17, "ims_other", "main_Income not derived from work / Remittances", 
+        18, "ims_other", "main_Income not derived from work / Income from other rents", 
+        19, "ims_no_income", "main_No income source in the last 3 months and used exclusively savings", 
+        20, "ims_no_income", "main_No income source in the last 3 months and used exclusively debt", 
+        21, "ims_other", "main_REFUSED")
 ```
+
+```{r}
+survey %>%  
+  
+  
+  glimpse()
+
+survey %>% select(matches("covid")) %>% 
+  select(covid_goodstransp, covid_marketclosed, covid_borderclosed, covid_stayhome, 
+         covid_gatherings, covid_processclosed, covid_other) %>% 
+  summarise_all(sum)
+
+survey %>% select(matches("ims")) %>%  
+  summarise_all(sum)
+```
+
+```{r}
+survey %>% select(matches("ims"))
+
+ims_prof_self_em
+ims_no_income
+```
+
 
 ### Mini
 ```{r}
@@ -101,6 +195,15 @@ survey_mini <- survey %>%
                         hh_debt_borrow_from %in% c(3, 4, 5, 6, 7, 8, 9) ~ 1, 
                         TRUE ~ 0)) %>%
   select(
+    ims_farmer,
+    ims_other, 
+    ims_public_em, 
+    ims_stable_ag, 
+    ims_stable_non_ag, 
+    ims_casual_ag,
+    ims_casual_non_ag,
+    ims_prof_self_em, 
+    ims_no_income, 
     shocks_conflict,
     shocks_lostwork,  
     shocks_foodprices, 
@@ -111,10 +214,6 @@ survey_mini <- survey %>%
     edu_secondary,
     edu_primary,
     edu_low,
-    # income_ms_no_income,
-    # income_ms_casual_non_ag,
-    # income_ms_stable_non_ag,
-    # income_ms_agriculture,
     rural,
     children_0_4,
     hoh_female,
@@ -135,23 +234,17 @@ survey_mini <- survey %>%
     cs_emergency_sold_house,
     cs_emergency_hh_risk,
     cs_emergency_sold_last_draught,
-    cs_emergency_hh_migration,  
-    hh_debt, 
+    cs_emergency_hh_migration, 
     hh_debt_more,
     survey_id, 
-    agri_activity, 
+    agri_hhd, 
     hh_size, 
     no_accessmarket, 
     not_improved_drinking_water, 
     tot_income,
     income_reduced, 
-    ims_farmer, 
-    ims_casual_non_ag, ims_casual_ag, 
-    ims_public_em, 
-    ims_no_income, 
-    ims_prof_self_em, 
-    ims_stable_non_ag, ims_stable_ag, 
-    ims_other
+    covid_goodstransp, 
+    covid_marketclosed
   ) %>%
   mutate(across(where(is.numeric), ~ replace(., is.na(.), 0))) 
 
@@ -189,6 +282,7 @@ plot_coef <- function(tbl) {
   tbl %>%
     tidy(conf.int = TRUE) %>% 
     filter(term != "(Intercept)") %>% 
+    filter(p.value <= .05) %>% 
     mutate(term = fct_reorder(term, estimate)) %>%  
     ggplot(aes(x = estimate, y = term, colour = estimate)) + 
     geom_vline(xintercept = 0, lty = 2, colour = "red") + 
@@ -198,7 +292,8 @@ plot_coef <- function(tbl) {
     theme(legend.position = "none", 
           axis.text.y = element_text(size = 8.5), 
           axis.title.x = element_text(size = 7, face = "bold"), 
-          plot.title = element_text(size = 9))
+          plot.title = element_text(size = 9), 
+          plot.background = element_rect(colour = "white"))
 }
 
 ```
@@ -209,6 +304,29 @@ survey_mini %>%
   count(no_market, shocks_accessmarket)
 ```
 
+```{r}
+survey2 %>% 
+  select(hoh_female, children_0_4, hh_size, hhdisability, fs_score, 
+         rural, expense_food, not_improved_sanitation, income_main_comp, 
+         agri_activity, lhcsi_max, lhcsi_range, accessmarket, 
+         survey_id, matches("shocks_")
+         ) %>% 
+  left_join(survey2 %>% 
+              select(survey_id, income_source, hoh_education) %>% 
+              pivot_longer(cols = -survey_id, names_to = "old_var", values_to = "var") %>% 
+              mutate(value = 1) %>% 
+              select(-old_var) %>% 
+              pivot_wider(names_from = var, values_from = value, values_fill = 0), 
+            by = "survey_id") %>%  
+  mutate(score = log(fs_score), 
+         score = ifelse(is.infinite(score), 0, score)) %>%
+  select(-fs_score, -survey_id, -`NA`, -income_ms_fisheries, -edu_religious, -lhcsi_range) %>% 
+  lm(score ~ ., data = .) %>% 
+  plot_coef() + 
+  labs(title = "Food Insecurity Score")
+
+
+```
 
 
 ```{r fig.height=8}
@@ -216,41 +334,62 @@ survey_mini %>%
 
 survey_mini %>%
   left_join(survey %>% select(score = fs_score, survey_id), by = "survey_id") %>% 
-  select(-survey_id, -matches("cs_|fies_|fcs_")) %>%
-  lm(score ~ . - 1, data = .) %>% 
+  select(-survey_id, -matches("cs_|fies_|fcs_"), -tot_income) %>%
+  mutate(score = log(score), 
+         score = ifelse(is.infinite(score), 0, score))  %>% 
+  lm(score ~ ., data = .) %>% 
   plot_coef() + 
   labs(title = "Food Insecurity Score") +
 
 survey_mini %>%
   left_join(survey %>% select(score = hhfcs_inv, survey_id), by = "survey_id") %>% 
-  select(-survey_id, -matches("cs_|fies_|fcs_")) %>%
-  lm(score ~ . - 1, data = .) %>% 
+  select(-survey_id, -matches("cs_|fies_|fcs_"), -tot_income) %>%
+  # mutate(score = log(score), 
+  #        score = ifelse(is.infinite(score), 0, score))  %>% 
+  lm(score ~ ., data = .) %>% 
   plot_coef() + 
   labs(title =  "Food Consumption Score", y = "") +
   
 survey_mini %>% 
   left_join(survey %>% select(score = csi_weighted, survey_id), by = "survey_id") %>% 
-  select(-survey_id, -matches("cs_|fies_|fcs_")) %>%
-  lm(score ~ . - 1, data = .) %>% 
+  select(-survey_id, -matches("cs_|fies_|fcs_"), -tot_income) %>%
+  # mutate(score = log(score), 
+  #        score = ifelse(is.infinite(score), 0, score))  %>% 
+  lm(score ~ ., data = .) %>% 
   plot_coef() + 
   labs(title = "Coping Strategies Index", y = "") + 
   
 survey_mini %>% 
   left_join(survey %>% select(score = fies_raw_range, survey_id), by = "survey_id") %>% 
-  select(-survey_id, -matches("cs_|fies_|fcs_")) %>%
-  lm(score ~ . - 1, data = .) %>% 
+  select(-survey_id, -matches("cs_|fies_|fcs_"), -tot_income) %>%
+  # mutate(score = log(score), 
+  #        score = ifelse(is.infinite(score), 0, score))  %>% 
+  lm(score ~ ., data = .) %>% 
   plot_coef() + 
-  labs(title = "Food Insecurity Experience Scale", y = "")
+  labs(title = "Food Insecurity Experience Scale", y = "") + 
   
- glimpse(survey_mini)
-
- survey_mini %>% 
-   left_join(survey %>% select(fs_score, survey_id), by = "survey_id") %>% 
-   lm(fs_score ~ no_market - 1, data = .) %>%  
-   tidy()
-   select(no_market)
-   summarise_at("no_market", sum)
+  plot_annotation(title = "Coefficient plots -- food security indices", 
+                  subtitle = "Redder colours indicate higher correlations with food insecurity", 
+                  caption = "Data source: WFP-FAO survey", 
+                  theme = theme(plot.caption = element_text(hjust = .5)))
+  
+ggsave(filename = "./misc/coefficient_plots.png", dpi = 300, height = 7, width = 11, units = "in")
+  
+  
 ```
+
+```{r}
+survey_mini %>%
+  left_join(survey %>% select(score = fs_score, survey_id), by = "survey_id") %>% 
+  select(-survey_id, -matches("cs_|fies_|fcs_")) %>%
+  lm(score ~ ., data = .) %>%  tidy() %>%  arrange(desc(estimate))
+```
+
+```{r}
+
+```
+
+
 
 ```{r}
 survey_mini %>%
@@ -306,10 +445,15 @@ rf_spec <- rand_forest(mtry = .cols()) %>%
   set_engine("randomForest", importance = TRUE) %>% 
   set_mode("regression")
 
-rf_fit_train <- fit(rf_spec, fs_score ~ ., data= train)
-rf_fit_test <- fit(rf_spec, shocks_conflict ~ ., data = test)
+class_spec <- rand_forest(mtry = .cols()) %>% 
+  set_engine("randomForest", importance = TRUE) %>% 
+  set_mode("classification")
 
-vip(rf_fit, num_features = 20L, geom = c("col")) +  
+rf_fit_train <- fit(class_spec, shocks_conflict ~ ., data= train)
+rf_fit_test <- fit(rf_spec, fs_score ~ ., data = train)
+
+
+vip(rf_fit_test, num_features = 20L, geom = c("col")) +  
   labs(title = "Variable importance plot -- Food Insecurity")
 
 ```
@@ -361,24 +505,6 @@ survey %>%
 ```
 
 
-
-
-
-1, To buy food
-2, To buy non-food items
-3, To pay for rent or an accomodation
-4, To pay school/education costs
-5, To cover health expenses
-6, To pay for durable goods
-7, To pay for ceremonies/social events
-8, To buy an apartment/house
-9, To pay ticket/cover travel for migration
-10, To buy agricultural land/inputs or livestock
-11, To invest in business
-12, To pay back another loan
-13, Other
-14, DON'T KNOW
-15, REFUSED
 
 ### Noaccessmarkets
 
@@ -476,6 +602,41 @@ survey_ward$labels <- survey$survey_id
 glimpse(survey_ward)
 ```
 
+### Exploratory K-means
+
+I think k means probably won't provide as much value as hclust
+
+```{r}
+kclusts <- 
+  tibble(k = 1:9) %>% 
+  mutate(kclust = map(k, ~ kmeans(km_data %>% select(-survey_id), .x)), 
+         tidied = map(kclust, tidy), 
+         glanced = map(kclust, glance), 
+         augmented = map(kclust, augment, km_data))
+
+clusters <- kclusts %>% unnest(cols = c(tidied))
+
+assignments <- kclusts %>% unnest(cols = c(augmented)) %>% 
+  left_join(survey %>% select(fs_score, survey_id), by = "survey_id")
+
+clusterings <- kclusts %>% unnest(cols = c(glanced))
+
+
+theme_set(theme_light())
+ggplot(assignments, aes(x = tot_income, y = fs_score)) +
+  geom_point(aes(color = .cluster), alpha = 0.8) + 
+  scale_x_log10() + 
+  facet_wrap(~ k)
+
+survey %>% {sum(is.na(.$tot_income))}
+```
+
+```{r}
+kclusts %>% 
+  unnest(cols = c(tidied))
+```
+
+
 ### K-means
 
 ```{r}
@@ -493,31 +654,20 @@ km_res <- km_data %>%
   kmeans(10, nstart = 25)
 
 
-survey_km <- survey_mini %>% 
-  cbind(cluster = km_res$cluster) %>% 
-  left_join(survey_mini_clust %>% 
-              select(cluster, survey_id), by = "survey_id") %>% 
-   left_join(survey %>%
-              select(survey_id, adm3_pcode, hhfcs_inv, fies_raw_range, csi_weighted, fs_score), 
-            by = "survey_id") %>% 
-  left_join(read_csv("./data/pcodes.csv") %>% 
-              select(admin3_pcode, state) %>% 
-              distinct(), 
-              by = c("adm3_pcode" = "admin3_pcode")) %>%
-  group_by(cluster) %>% 
-  mutate(cluster_count = ifelse(is.na(cluster), 0, 1), 
-         cluster_n = sum(cluster_count)) %>% 
-  ungroup()
 ```
 
+
+### Survey kclust 
+
 ```{r}
-survey_mini_clust <- survey_mini %>% 
+survey_kclust <- survey_mini %>% 
   cbind(cluster = km_res$cluster) %>% 
   mutate(cluster = recode(cluster, 
                           `1` = "L", `2` = "M", `3` = "N", `4` = "O" ,`5` = "P", 
                           `6` = "Q", `7` = "R", `8` = "S", `9` = "T", `10` = "U")) %>% 
   left_join(survey %>%
-              select(survey_id, adm3_pcode), 
+              select(survey_id, adm3_pcode, 
+                     hhfcs_inv, fies_raw_range, csi_weighted, fs_score), 
             by = "survey_id") %>% 
   left_join(read_csv("./data/pcodes.csv") %>% 
               select(admin3_pcode, state) %>% 
@@ -544,17 +694,17 @@ rect.hclust(survey_ward, k = 8)
 
 
 ```{r}
-survey_clust %>% as.dendrogram() %>% set("branches_k_color", k = 11) %>% 
+survey_ward %>% as.dendrogram() %>% set("branches_k_color", k = 10) %>% 
   plot(main = "Default colors")
 ```
 
-# Survey_clust
+# Survey_hclust
 
 
 ```{r}
 survey_hclust <- tibble(
   label = survey_ward$labels,
-  cluster_id = cutree(survey_ward, k = 10)) %>%
+  cluster_id = cutree(survey_ward, k = 7)) %>%
   right_join(survey_mini, by = c("label" = "survey_id")) %>% 
   mutate(cluster = case_when(cluster_id ==  1 ~ "L",
                              cluster_id ==  2 ~ "M", 
@@ -565,11 +715,13 @@ survey_hclust <- tibble(
                              cluster_id ==  7 ~ "R", 
                              cluster_id ==  8 ~ "S",
                              cluster_id ==  9 ~ "T", 
-                             cluster_id ==  10 ~ "U", 
+                             cluster_id == 10 ~ "U", 
                              cluster_id == 11 ~ "V")) %>% 
   rename(survey_id = label) %>% 
   left_join(survey %>%
-              select(survey_id, adm3_pcode), 
+              select(survey_id, adm3_pcode, weight_final, 
+                     hhfcs_inv, fs_score, 
+                     fies_raw_range, csi_weighted), 
             by = "survey_id") %>% 
   left_join(read_csv("./data/pcodes.csv") %>% 
               select(admin3_pcode, state) %>% 
@@ -586,6 +738,10 @@ survey_hclust <- tibble(
 
 ```
 
+
+```{r}
+
+```
 
 
 ## Plotting the clusters against food insecurity indices 
@@ -605,7 +761,7 @@ plot_score <- function(tbl) {
     
 }
 
-survey_clust %>% 
+survey_hclust %>% 
   left_join(survey %>% select(survey_id, weight_final), by = "survey_id") %>% 
   group_by(cluster) %>% 
   mutate(weight = sum(weight_final), 
@@ -636,7 +792,7 @@ survey_clust %>%
 
 
 ```{r fig.height=8}
-survey_clust %>% 
+survey_hclust %>% 
   mutate(value = hhfcs_inv) %>% 
   plot_score() +
   geom_hline(yintercept = 0.7083333, lty = 2, colour = "red", alpha = .5, lwd = 2) + 
@@ -645,7 +801,7 @@ survey_clust %>%
        title = "Food consumption score (re-scaled)", 
        subtitle = "Red line is the 75th percentile.") +
 
-survey_clust %>% 
+survey_hclust %>% 
   mutate(value = csi_weighted) %>%
   plot_score() + 
   geom_hline(yintercept = 0.1428571, lty = 2, colour = "red", alpha = .5, lwd = 2) +
@@ -653,7 +809,7 @@ survey_clust %>%
        title = "Coping strategies index  (re-scaled)", 
        subtitle = "Red line is the 75th percentile.") +
 
-survey_clust %>% 
+survey_hclust %>% 
   mutate(value = fies_raw_range) %>% 
   plot_score() +
   geom_hline(yintercept = 0.25, lty = 2, colour = "red", alpha = .5, lwd = 2) + 
@@ -661,7 +817,7 @@ survey_clust %>%
        title = "Food insecurity experience scale (re-scaled)", 
        subtitle = "Red line is the 75th percentile.") +
 
-survey_clust %>% 
+survey_hclust %>% 
   mutate(value = fs_score) %>% 
   plot_score() +
   geom_hline(yintercept = 0.2426224, lty = 2, colour = "red", alpha = .5, lwd = 2) + 
@@ -793,6 +949,8 @@ If you work in Cluster 5, with conflict, the variables you should consider are
 
 ## Reference table
 
+
+
 ```{r fig.height=8}
   
 js <- c(
@@ -804,7 +962,7 @@ js <- c(
   "}"
 )
 
-survey_clust %>% 
+survey_kclust %>% 
   left_join(survey %>% select(survey_id, weight_final)) %>% 
   # filter(cluster_id !=  "O") %>%
   filter(hh_size != 0) %>% 
@@ -819,22 +977,20 @@ survey_clust %>%
             weighted = sum(weight_final, na.rm = TRUE), 
             rural = mean(rural, na.rm = TRUE), 
             income_reduced = mean(income_reduced, na.rm = TRUE),
-            debt = mean(hh_debt, na.rm = TRUE), 
+            debt_more = mean(hh_debt_more, na.rm = TRUE), 
             conflict = mean(shocks_conflict), 
             lost_work = mean(shocks_lostwork), 
             food_prices = mean(shocks_foodprices), 
-            stable_non_ag = mean(stable_non_ag),
-            farmer = mean(farmer), 
-            prof_self_em = mean(prof_self_em), 
-            stable_ag = mean(stable_ag), 
-            casual_ag = mean(casual_ag), 
-            casual_non_ag = mean(casual_non_ag), 
-            public_em = mean(public_em), 
-            no_income = mean(no_income),
-            income_other = mean(other), 
+            stable_non_ag = mean(ims_stable_non_ag),
+            farmer = mean(ims_farmer), 
+            stable_ag = mean(ims_stable_ag), 
+            casual_ag = mean(ims_casual_ag), 
+            casual_non_ag = mean(ims_casual_non_ag), 
+            public_em = mean(ims_public_em), 
+            no_income = mean(ims_no_income),
             
             children_0_4 = mean(children_0_4, na.rm = TRUE), 
-            edu_secondary = mean((edu_secondary + edu_higher), na.rm = TRUE),
+            edu_sec = mean((edu_secondary + edu_higher), na.rm = TRUE),
             tot_income = sum(tot_income, na.rm = TRUE),
             pop = sum(hh_size, na.rm = TRUE)) %>%  
   mutate_at(vars(rural:children_0_4), ~ round(.x * 100, digits = 2)) %>% 
@@ -844,7 +1000,7 @@ survey_clust %>%
   mutate(income_pc = round(tot_income / pop, digits = 0)) %>% 
   select(-tot_income, -pop, -sample) %>% 
   relocate(income_pc, .after = rural) %>% 
-  arrange(desc(fs_score)) 
+  arrange(desc(fs_score)) %>% pander()
   # filter(sample >= 1) %>% 
   
 
@@ -867,6 +1023,279 @@ survey_clust %>% glimpse()
          na_hh_size = ifelse(hh_size == 0, 1, 0)) %>% 
   count(na_hh_size, na_tot_income)
 
+
+```
+
+
+### Reference - Hclust
+
+```{r}
+survey_mini %>% 
+  left_join(survey %>% select(survey_id, weight_final, 
+                              fies_raw_range, csi_weighted, hhfcs_inv, fs_score), by = "survey_id") %>%
+  mutate(priority = ifelse(fs_score >= quantile(fs_score, probs = .75), 
+                           "priority", "not_priority")) %>%
+  filter(hh_size != 0) %>% 
+  select(matches("fies_|fcs_|cs_"), priority) %>% 
+  group_by(priority) %>% 
+  summarise_all(mean) %>% 
+  pivot_longer(cols = -c(priority))  
+  
+survey_hclust %>% 
+  select(matches("fies_|fcs_|cs_"), fs_score, cluster) %>% 
+  group_by(cluster) %>% 
+  summarise_all(mean) %>%
+  left_join(survey_hclust %>% 
+          group_by(cluster) %>% 
+          summarise(weighted = sum(weight_final)) %>% 
+          ungroup() %>% 
+          mutate(weighted = round(weighted / sum(weighted) * 100, digits = 2)), 
+          by = "cluster") %>% 
+  arrange(desc(fs_score))
+```
+
+
+## Food Security indicators
+
+```{r}
+survey_mini %>% 
+  select(matches("fies|fcs_|cs_"), shocks_conflict) %>% 
+  select(-fcs_borderline_poor, -matches("fcs")) %>% 
+  lm(shocks_conflict ~ ., data = ., family = "quasibinomial") %>% 
+  tidy(conf.int = TRUE) %>% 
+  # filter(p.value <= .05) %>% 
+  filter(term != "(Intercept)") %>% 
+  mutate(term = fct_reorder(term, estimate)) %>%  
+  ggplot(aes(x = estimate, y = term, colour = estimate)) + 
+  geom_vline(xintercept = 0, lty = 2, colour = "red") + 
+  geom_point() + 
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = .2) + 
+  scale_colour_viridis(option = "turbo") + 
+  theme(legend.position = "none", 
+        axis.text.y = element_text(size = 8.5), 
+        axis.title.x = element_text(size = 7, face = "bold"), 
+        plot.title = element_text(size = 9))
+  
+  summary()
+```
+
+### Priority non-priority
+
+```{r}
+survey_mini %>% 
+  left_join(survey %>% select(survey_id, weight_final, 
+                              fies_raw_range, csi_weighted, hhfcs_inv, fs_score), by = "survey_id") %>%
+  mutate(priority = ifelse(fs_score >= quantile(fs_score, probs = .75), 
+                           "priority", "not_priority")) %>%
+  filter(hh_size != 0) %>% 
+  select(matches("fies_|fcs_|cs_"), priority) %>% 
+  group_by(priority) %>% 
+  summarise_all(mean) %>% 
+  pivot_longer(cols = -c(priority)) %>%  
+  filter(name %out% c("hhfcs_inv", "fs_score", "csi_weighted", "fies_raw_range", "fcs_borderline_poor")) %>% 
+  ggplot(aes(y = value, x = name)) + 
+  geom_col(position = position_dodge(), aes(fill = priority), width = .5) + 
+  scale_fill_brewer(palette = "Dark2") + 
+  scale_y_continuous(labels = percent_format(accuracy = 1), breaks = seq(0, 1, .1)) + 
+  labs(x = "", y = "Percent of group", 
+       title = "Food security indicators -- priority and non-priority group") +  
+  coord_flip() + 
+  theme(plot.background = element_rect(colour = "white"))
+  
+ggsave(filename = "./misc/priority_non_priority_round3.png", dpi = 300, height = 7, width = 11, units = "in")
+  
+```
+
+### k-means for food security index component indicators
+
+```{r}
+# k-means clustering and output
+set.seed(123)
+
+km_data_fs <- recipe(~., data = survey_mini %>% 
+                    select(matches("fies|fcs_|cs_"), survey_id)) %>% 
+  update_role(survey_id, new_role = "ID") %>%
+  step_normalize(all_predictors()) %>% 
+  prep() %>% 
+  bake(new_data = NULL)
+
+km_res_fs <- km_data_fs %>%  
+  select(-survey_id) %>% 
+  kmeans(7, nstart = 25)
+
+
+```
+
+```{r}
+mini_fs <- survey_mini %>% 
+  cbind(cluster = km_res_fs$cluster) %>%  
+  left_join(survey %>% select(fs_score, survey_id), by = "survey_id") %>% 
+  group_by(cluster) %>% 
+  mutate(cluster_count = ifelse(is.na(cluster), 0, 1), 
+         cluster_n = sum(cluster_count)) %>% 
+  ungroup()
+
+mini_fs %>% 
+  select(-survey_id) %>% 
+  group_by(cluster) %>% 
+  summarise_all(mean) %>% 
+  select(-matches("fies|fcs_|cs_")) %>% 
+  arrange(desc(fs_score))
+
+
+```
+
+```{r fig.height=6}
+survey_mini %>% 
+  left_join(survey %>% select(survey_id, weight_final, 
+                              fies_raw_range, csi_weighted, hhfcs_inv, fs_score), by = "survey_id") %>%
+  mutate(priority = ifelse(fs_score >= quantile(fs_score, probs = .75), 
+                           "priority", "not_priority")) %>%
+  filter(hh_size != 0) %>% 
+  select(-matches("fcs_|cs_|fies_|cluster|state|adm3|weight_final")) %>% 
+  select(-survey_id) %>% 
+  group_by(priority) %>% 
+  summarise_all(mean) %>% 
+  pivot_longer(cols = -c(priority)) %>% 
+  pivot_wider(names_from = priority, values_from = value) %>% 
+  arrange(desc(priority)) %>% 
+  mutate(percent_diff = (priority - not_priority) / not_priority) %>% 
+  mutate_at(vars(not_priority, priority, percent_diff), ~ round(.x * 100, digits = 2)) %>% 
+  mutate(not_priority = ifelse(name %in% c("tot_income", "hh_size",
+                                           "fs_score", "hhfcs_inv", "csi_weighted", "fies_raw_range"),
+                               round(not_priority / 100, digits = 2), not_priority), 
+         priority = ifelse(name %in% c("tot_income", "hh_size", 
+                                       "fs_score", "hhfcs_inv", "csi_weighted", "fies_raw_range"),
+                           round(priority / 100, digits = 2), priority)) %>%  
+  arrange(desc(percent_diff)) %>% 
+  filter(name %out% c("csi_weighted", "fies_raw_range", "hhfcs_inv", "fs_score", "tot_income")) %>% 
+  mutate(name = fct_reorder(name, percent_diff)) %>% 
+  ggplot(aes(x = priority, y = name)) + 
+  geom_col(aes(fill = percent_diff)) + 
+  geom_text(aes(label = percent_diff), hjust = 0) + 
+  scale_fill_viridis(option = "inferno", direction = -1) + 
+  scale_x_continuous(breaks = seq(0, 60, by = 10)) +
+  labs(x = "% of priority group", y = "", fill = "%diff", 
+       title = "Indicators most associated with food insecurity", 
+       subtitle = "Darker colours show indicators most associated with food insecurity", 
+       caption = "Data source: FAO-WFP food security survey round 3") + 
+  theme(plot.caption = element_text(hjust = .5), 
+        plot.background = element_rect(colour = "white"))
+
+ggsave(filename = "./misc/food_insecurity_round3.png", dpi = 300, height = 7, width = 11, units = "in")
+  
+```
+
+
+```{r}
+survey_mini %>% 
+  count(covid_marketclosed, no_accessmarket, shocks_accessmarket)
+```
+
+## Trees again 
+
+```{r}
+tree4 <- survey %>% 
+  rpart(priority ~  shocks_lostwork + shocks_sicknessdeath + shocks_foodprices + shocks_conflict + shocks_cantworkbusiness +
+          shocks_naturalhazard + shocks_accessmarket + shocks_pricesother + shocks_other + rural + not_improved_sanitation,
+        data = .,  weights = combined_wt , cp = 0.01)
+
+tree6 <- survey %>% 
+  mutate(children_0_4 = ifelse(children_0_4 > 0, 1, 0)) %>% 
+  rpart(priority ~ children_0_4 + hoh_female + hoh_education + hoh_age, data = ., weights = combined_wt, cp = .0088)
+
+survey <- survey %>% 
+  mutate(rule4 = row.names(tree4$frame)[tree4$where]) %>% 
+  left_join(rpart.rules.table(tree4) %>% 
+              filter(Leaf == TRUE) %>% 
+              rename(rule4 = Rule) %>% 
+              group_by(rule4) %>% 
+              summarise(subrules4 = paste(Subrule, collapse = ",")), by = "rule4") %>% 
+  mutate(rule6 = row.names(tree6$frame)[tree6$where]) %>% 
+  left_join(rpart.rules.table(tree6) %>% 
+              filter(Leaf == TRUE) %>% 
+              rename(rule6 = Rule) %>% 
+              group_by(rule6) %>% 
+              summarise(subrules6 = paste(Subrule, collapse = ",")), by = "rule6")
+
+tree7 <- survey_mini %>% 
+  left_join(survey %>% select(survey_id,
+                              fies_raw_range, csi_weighted, hhfcs_inv, fs_score), by = "survey_id") %>%
+  mutate(priority = ifelse(fs_score >= quantile(fs_score, probs = .75), 
+                           1, 0)) %>%
+  filter(hh_size != 0) %>% 
+  select(-matches("fcs_|cs_|fies_|cluster|state|adm3|fs_score|csi|survey_id|tot_income")) %>% 
+  rpart(priority ~ ., data = ., cp = .005)
+
+tree8 <- survey_mini %>% 
+  left_join(survey %>% select(survey_id, fs_score, csi_weighted, hhfcs_inv, fies_raw_range), 
+            by = "survey_id") %>% 
+  mutate(priority = case_when(hhfcs_inv >= quantile(hhfcs_inv, probs = 0.75) & 
+                                 fies_raw_range >= quantile(fies_raw_range, probs = 0.75) ~ 1, 
+                               hhfcs_inv >= quantile(hhfcs_inv, probs = 0.75) & 
+                                 csi_weighted >= quantile(csi_weighted, probs = 0.75) ~ 1,
+                              fies_raw_range >= quantile(fies_raw_range, probs = 0.75) & 
+                                 csi_weighted >= quantile(csi_weighted, probs = 0.75) ~ 1, 
+                               TRUE ~ 0)) %>%  
+  select(matches("ims|shocks|edu_"), priority, 
+         hh_debt_more, no_accessmarket, income_reduced, rural, children_0_4) %>% 
+  rpart(priority ~ ., data = .)
+
+plotcp(tree8)
+
+fancyRpartPlot(tree8, digits = -3, palettes = "Blues", type = 2, sub = "", 
+               main = "Test tree")
+
+rpart.plot(tree8, fallen.leaves = TRUE)
+```
+
+```{r}
+survey_mini %>% 
+  select(-survey_id, -tot_income) %>% 
+  lm(hh_debt_more ~ ., data = .) %>% 
+  tidy(conf.int = TRUE) %>% 
+  filter(term != "(Intercept)" & p.value <= .05) %>% 
+  mutate(term = fct_reorder(term, estimate)) %>% 
+  ggplot(aes(x = estimate, y = term)) + 
+  geom_vline(xintercept = 0, lty = 2, colour = "red") + 
+  geom_point() + 
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = .2) +
+  
+survey_mini %>% 
+  select(-survey_id, -tot_income) %>% 
+  lm(no_accessmarket ~ ., data = .) %>% 
+  tidy(conf.int = TRUE) %>% 
+  filter(term != "(Intercept)" & p.value <= .05) %>% 
+  mutate(term = fct_reorder(term, estimate)) %>% 
+  ggplot(aes(x = estimate, y = term)) + 
+  geom_vline(xintercept = 0, lty = 2, colour = "red") + 
+  geom_point() + 
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = .2) +
+
+survey_mini %>% 
+  select(-survey_id, -tot_income) %>% 
+  lm(shocks_lostwork ~ ., data = .) %>% 
+  tidy(conf.int = TRUE) %>% 
+  filter(term != "(Intercept)" & p.value <= .05) %>% 
+  mutate(term = fct_reorder(term, estimate)) %>% 
+  ggplot(aes(x = estimate, y = term)) + 
+  geom_vline(xintercept = 0, lty = 2, colour = "red") + 
+  geom_point() + 
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = .2) +
+
+survey_mini %>% 
+  select(-matches("ims")) %>% 
+  left_join(survey_mini %>% select(ims_casual_non_ag, survey_id), 
+            by = "survey_id") %>% 
+  select(-survey_id, -tot_income) %>% 
+  lm(ims_casual_non_ag ~ ., data = .) %>% 
+  tidy(conf.int = TRUE) %>% 
+  filter(term != "(Intercept)" & p.value <= .05) %>% 
+  mutate(term = fct_reorder(term, estimate)) %>% 
+  ggplot(aes(x = estimate, y = term)) + 
+  geom_vline(xintercept = 0, lty = 2, colour = "red") + 
+  geom_point() + 
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = .2) 
 
 ```
 
@@ -927,30 +1356,6 @@ survey_clust %>%
   summarise_all(mean)
 ```
 
-
-
-
-1, Farmer / Production and sale of staple crops
-2, Farmer / Production and sale of vegetable or fruit
-3, Farmer / Production and sale of cashcrops
-4, Farmer / Production and sale of livestock and livestock products
-5, Farmer / Production and sale of fish
-6, Collection and sale of forestry or bush products
-7, Informal agricultural trade EXCLUDING producers
-8, Formal agricultural trade EXCLUDING producers
-9, Daily wage on farms and other casual employment in agricultural sector
-10, Stable employment in agricultural sector
-11, Non-agricultural self-employed or liberal profession / doctor / architect / lawyer / including restaurant
-12, Off-farm daily wages and other non-agricultural casual employment
-13, Stable employment in non-agricultural sector
-14, Public employment
-15, Income not derived from work / Charity
-16, Income not derived from work / Welfare transfer / pension / humanitarian aid
-17, Income not derived from work / Remittances
-18, Income not derived from work / Income from other rents
-19, No income source in the last 3 months and used exclusively savings
-20, No income source in the last 3 months and used exclusively debt
-21, REFUSED
 
 ```{r}
 
@@ -1028,7 +1433,7 @@ survey_mini %>% count(hh_debt)
 survey_mini %>%
   select(hh_debt_more, matches("fies|cs_|fcs_")) %>% 
   lm(hh_debt_more ~ ., data = ., family = "binomial") %>% 
-  plot_coef() + 
+  plot_coef()  
 
 survey_mini %>% 
   select(hh_debt, matches("fies|cs_|fcs_")) %>% 
@@ -1122,6 +1527,7 @@ survey_mini %>% count(hh_debt, hh_debt_more)
 
 ### Shocks 
 
+
 ```{r}
 
 survey %>%  
@@ -1163,7 +1569,9 @@ survey %>%
 ```
 
 ```{r}
-
+survey %>% 
+  lm(fs_score ~ fcs_pr, data = .) %>% 
+  summary()
 ```
 
 
@@ -1201,12 +1609,71 @@ Depth of assistance -- it really gives the wrong impression
 
 Three months at 2,100 kcal/day 
 
+## conflict
 
 
 ```{r}
-
+survey_mini %>% 
+  select(-survey_id) %>% 
+  lm(shocks_conflict ~ ., data = .) %>%
+  tidy() %>% 
+  filter(p.value < .05) %>% 
+  arrange(desc(estimate))
 ```
 
+```{r}
+
+survey %>%
+  select(shocks_conflict, hoh_education, fs_score) %>%
+  group_by(hoh_education) %>% 
+  do(tidy(lm(data = ., formula = fs_score ~ shocks_conflict), conf.int = TRUE)) %>% 
+  filter(term != "(Intercept)" & !is.na(hoh_education)) %>%
+  filter(p.value < .05) %>% 
+  ungroup() %>% 
+  mutate(hoh_education = fct_reorder(hoh_education, estimate)) %>% 
+  ggplot(aes(x = estimate, y = hoh_education, colour = estimate)) + 
+    geom_vline(xintercept = 0, lty = 2, colour = "red") + 
+    geom_point(size = 2) + 
+    geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = .2) + 
+    scale_colour_viridis(option = "turbo") + 
+    theme(legend.position = "none", 
+          axis.text.y = element_text(size = 8.5), 
+          axis.title.x = element_text(size = 7, face = "bold"), 
+          plot.title = element_text(size = 9), 
+          plot.background = element_rect(colour = "white")) + 
+  labs(y = "Education level, head of household") + 
+
+survey %>%
+  select(shocks_conflict, income_main_text, fs_score) %>%
+  group_by(income_main_text) %>% 
+  do(tidy(lm(data = ., formula = fs_score ~ shocks_conflict), conf.int = TRUE)) %>% 
+  filter(term != "(Intercept)" & !is.na(income_main_text)) %>%
+  filter(p.value < .05) %>% 
+  ungroup() %>% 
+  mutate(income_main_text = str_remove(income_main_text, "ims_"), 
+         income_main_text = fct_reorder(income_main_text, estimate)) %>% 
+  ggplot(aes(x = estimate, y = income_main_text, colour = estimate)) + 
+    geom_vline(xintercept = 0, lty = 2, colour = "red") + 
+    geom_point(size = 2) + 
+    geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = .2) + 
+    scale_colour_viridis(option = "turbo") + 
+    theme(legend.position = "none", 
+          axis.text.y = element_text(size = 8.5), 
+          axis.title.x = element_text(size = 7, face = "bold"), 
+          plot.title = element_text(size = 9), 
+          plot.background = element_rect(colour = "white")) + 
+  labs(y = "Main income source") + 
+  
+  
+  plot_annotation(title = "Impact of conflict on food insecurity ", 
+                  subtitle = "Redder colours indicate higher correlations with food insecurity", 
+                  caption = "Data source: WFP-FAO survey; only showing indicators with p-value < 0.05", 
+                  theme = theme(plot.caption = element_text(hjust = .5)))
+  
+ggsave(filename = "./misc/conflict_estimates.png", dpi = 300, height = 7, width = 11, units = "in")
+
+
+```
  
  
 
@@ -1223,4 +1690,152 @@ Can these groups be linked to the township prioritisation groups?
 It has been proven in other contexts that education is a strong predictor of wealth and also of adaptability to shocks and stresses
 
 
+
+# Clustering 
+
+```{r}
+
+set.seed(123)
+
+kclusts 
+  
+  survey_mini %>%
+    left_join(survey %>%  select(final_weight, survey_id), by = "survey_id") %>%
+    mutate_all(.x * final_weight) %>% 
+    select(-matches("fies_|fcs_|cs_|survey_id|final_weight"))
+  
+    summarise_all(mean) %>%  pivot_longer(cols = everything()) %>% arrange(desc(value))
+  tibble(k = 1:29) %>%
+  mutate(kclust = map(k, ~kmeans(points, .x)), 
+         tidied = map(kclust, tidy), 
+         glanced = map(kclust, glance), 
+         augmented = map(kclust, augment, points))
+
+survey_mini %>% 
+  ggplot(aes(x = fcs_pr, y = income_reduced)) + 
+  geom_jitter()
+
+
+survey %>% glimpse()
+
+survey_mini %>% 
+  select(-matches("fies_|fcs_|cs_|survey_id")) %>% 
+  glimpse()
+```
+
+# Needs
+
+```{r}
+survey %>% 
+  select(matches("need_")) %>%
+  select(-matches("need_received")) %>% 
+  summarise_all(mean, na.rm = TRUE) %>%
+  pivot_longer(cols = everything(), names_to = "name", values_to = "value_r3") %>% 
+  left_join(survey2 %>%  
+              select(matches("need_")) %>%  
+              select(-matches("need_received")) %>%
+              summarise_all(mean, na.rm = TRUE) %>% 
+              pivot_longer(cols = everything(), names_to = "name", values_to = "value_r2")) %>% 
+  arrange(desc(value_r3)) %>% 
+  mutate(name = str_remove(name, "need_"))
+  
+sum(survey$weight_final)
+
+survey %>%
+  {sum(.$need, na.rm = TRUE)}
+
+survey %>% 
+  filter(need == 0) %>% 
+  {sum(.$weight_final)}
+
+survey %>% nrow()
+
+survey %>% {sum(.$weight_final, na.rm = TRUE)}
+
+survey %>% 
+  mutate(need = as.factor(need)) %>% 
+  
+  ggplot(aes(x = adm_name, y = weight_final)) + 
+  geom_col(aes(fill = need), position = position_dodge())
+
+
+```
+
+### Needs Plot 
+
+```{r}
+survey %>% 
+  group_by(state = adm_name, need) %>% 
+  summarise(weight = sum(weight_final)) %>% 
+  mutate(need = recode(need, 
+                       `1` = "yes", 
+                       `0` = "no"), 
+         need = fct_rev(need)) %>% 
+  ggplot(aes(x = state, y = weight, fill = need)) + 
+  geom_col(position = position_dodge())
+```
+
+```{r}
+survey %>% 
+  mutate_at(vars(contains("need_")), ~ .x * weight_final) %>% 
+  select(contains("need_")) %>% 
+  select(-contains("received")) %>% 
+  replace(is.na(.), 0) %>%
+  summarise_all(mean) %>%
+  pivot_longer(cols = everything()) %>% 
+  filter(value >= .01) %>% 
+  mutate(name = str_remove(name, "need_"), 
+         name = fct_reorder(name, value)) %>% 
+  ggplot(aes(x = value, y = name)) + 
+  geom_col() + 
+  geom_text(aes(label = percent(value, accuracy = .1)), hjust = -.1) + 
+  scale_x_continuous(labels = percent) +
+  labs(x = "% of population", y = "Need", 
+       title = "Most common needs", 
+       caption = "Data source: FAO-WFP food security survey round 3") + 
+  theme(plot.background = element_rect(colour = "white"))
+
+ggsave(filename = "./misc/most_common_needs.png", dpi = 300, height = 7, width = 11, units = "in")
+
+```
+
+
+### Comparison of needs with achieved 
+
+```{r}
+fsc <- read_csv("./data/fsc_q1_2022.csv")
+
+fsc %>% 
+  filter(!is.na(delivery_modality)) %>% 
+  group_by(delivery_modality) %>% 
+  summarise_at("reached_beneficiaries", sum) %>% 
+  mutate(pc = reached_beneficiaries / sum(reached_beneficiaries))
+  
+```
+
+
+```{r}
+survey2 %>% 
+  select(matches("need_")) %>% 
+  select(-matches("received")) %>% 
+  
+  summarise_all(mean, na.rm = TRUE) %>% 
+  pivot_longer(cols = everything(), names_to = "name", values_to = "round2") %>% 
+  full_join(survey %>% 
+              select(matches("need")) %>% 
+              select(-matches("received")) %>% 
+              summarise_all(mean, na.rm = TRUE) %>% 
+              pivot_longer(cols = everything(), names_to = "name", values_to = "round3"), by = "name") %>% 
+  filter(!str_detect(name, "needs")) %>% 
+  # filter(round2 >= 0.01 | round3 >= 0.01) %>%
+  mutate_at(vars(round2, round3), ~ 
+              round(.x, digits = 3)) %>% arrange(desc(round3))
+  mutate(name = str_remove(name,  "need_")) %>% 
+  arrange(desc(round3))
+  
+  mutate(name = recode(name, 
+                       "need_medicalservicessupply" = "medicalsupplyhealth", 
+                       "need_educationassistance" = "need_educationsupport", 
+                       "need_jobopportunity" = "need_job"))
+```
 

@@ -466,3 +466,34 @@ fs_pin %>%
 # This grouping separates all 330 townships along two criteria -- **high (A) or low (B) conflict score and high (1) or low (2) population density**. Groups A1 and A2 have above average conflict scores. These 107 townships should be prioritised for humanitarian interventions. Recalling the scatterplot above, the colours have now been updated to reflect the prioritisation group. From the plot below that whilst group A1 have populations that are easier to access (having higher population density), the incidence of conflict is higher overall in group A2, with the numbers of conflict-related fatalities being much higher. This quick-and-dirty prioritisation has managed to exclude almost all the townships in bottom-left quadrant (least conflict-affected) from groups A1 and A2. 
 
 # Groups A1 and A2 can be distinguished by their population density, with the average population density in group A1 being more than 100 times higher than in group A2. The average PIN per township is slightly higher in group A1 than in group A2. The scatterplot below shows townships by the number of people in need (x-axis) and the population density (y-axis), with the colours reflecting which group each belongs to:
+
+
+fsc %>% 
+  filter(township == "Minbya") %>% 
+  summarise(beneficiaries = sum(new_beneficiaries))
+
+fs_pin %>% 
+  mutate(vul_ranking = dense_rank(desc(mdp_adjust))) %>% 
+  select(state, admin1_pcode, township, admin3_pcode,
+         total_population_2021proj = population_2021_proj, 
+         conflict_ranking, flood_ranking, vul_ranking, 
+         food_security_pin_2022 = fs_pin, food_security_target_2022 = fs_targeted, 
+         beneficiaries_2022 = beneficiaries) %>% 
+  left_join(fsc %>%
+              mutate(activity_red = case_when(activity %in% c("food distributions (in kind/voucher/cash), moderate", 
+                                                              "food distributions (in kind/voucher/cash), severe") ~ 
+                                                "food distribution",
+                                              activity %in% c("multi-purpose cash transfer (MPC), moderate",
+                                                              "multi-purpose cash transfer (MPC), severe") ~ 
+                                                "multi-purpose cash transfer",
+                                              activity == "livelihoods vocational training" ~ "vocational training",
+                                              activity == "food/cash for work/assets" ~ "food_cash for work_assets",
+                                              activity == "income-generating activities and small grants" ~ "IGA and small grants", 
+                                              TRUE ~ activity), 
+                     activity_red = str_remove_all(activity_red, "provision of ")) %>% 
+              group_by(admin3_pcode, activity_red) %>% 
+              summarise(beneficiaries = sum(reached_beneficiaries)) %>% 
+              pivot_wider(names_from = activity_red, values_from = beneficiaries, values_fill = 0), 
+            by = "admin3_pcode") %>% 
+  write_csv("township_indicators_small.csv")
+

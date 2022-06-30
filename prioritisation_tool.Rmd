@@ -124,6 +124,8 @@ mode <- function(x) {
 ```
 
 ```{r datasets}
+# look at datasets.rmd for more info on cleaning
+
 # pcodes
 pcodes <- read_excel("./data/Myanmar PCodes Release_9.3_Jan2021_(StRgn_Dist_Tsp_Town_Ward_VT).xlsx",
                      sheet = "03_Township") %>%
@@ -191,18 +193,6 @@ survey_long <- survey %>%
 
 ```
 
-
-```{r}
-survey %>% 
-  group_by(state) %>%  
-  summarise(conflict = mean(shocks_conflict), 
-            count = n(), 
-            weight = sum(combined_wt)) %>% 
-  mutate(pc_weight = weight / sum(weight)) %>% 
-  mutate_at(vars(conflict, pc_weight), ~ round(.x * 100, digits = 2)) %>% 
-  select(-weight) %>% 
-  arrange(desc(conflict))
-```
 
 
 
@@ -1059,7 +1049,7 @@ mdp_scatter <- fs_pin %>%
   geom_vline(aes(xintercept = median(mdp_adjust)), colour = "red", lty = 2) +
   geom_point(aes(size = population_2021_proj), alpha = .7) +
   scale_colour_viridis(option = "magma", direction = -1) + 
-  labs(x = "Multidimensional vulnerability (2015)", y = "Conflict score (2021)", colour = "conflict\nscore", 
+  labs(x = "Multidimensional vulnerability (2019)", y = "Conflict score (2021)", colour = "conflict\nscore", 
        title = "Multidimensional vulnerability and conflict by township", 
        subtitle = "Averages marked by red lines; population marked by size")
 
@@ -1237,7 +1227,7 @@ group_scatter <- fs_pin %>%
   geom_vline(aes(xintercept = median(mdp_adjust)), colour = "red", lty = 2) +
   geom_point(aes(size = population_2021_proj), alpha = .7) +
   scale_colour_viridis_d(option = "cividis") + 
-  labs(x = "Multidimensional vulnerability (2015)", y = "Conflict score (2021)", 
+  labs(x = "Multidimensional vulnerability (2019)", y = "Conflict score (2021)", 
        colour = "group", size = "", 
        title = "Multidimensional vulnerability and conflict by township", 
        subtitle = "Averages marked by red lines; population marked by size")
@@ -1940,4 +1930,8 @@ index_shares2 <- conflict_df2 %>%
           method = "bv", output = "all")
 
 ```
+
+
+
+
 

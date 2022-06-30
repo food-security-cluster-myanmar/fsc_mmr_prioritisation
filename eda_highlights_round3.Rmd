@@ -1,0 +1,498 @@
+---
+title: "EDA notes Round 3"
+author: "Myanmar Food Security Cluster"
+date: "14/06/2022"
+output: 
+  html_document:
+    code_download: true
+    theme: readable
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    number_sections: false
+    collapsed: false
+always_allow_html: true   
+---
+
+```{css, echo=FALSE}
+
+#TOC::before {
+  content: "";
+  display: block;
+  height: 70px;
+  margin: 2em 20px 40px 20px;
+  background-image: url("Myanmar_cluster_blue.png");
+  background-size: contain;
+  background-position: center center;
+  background-repeat: no-repeat;
+}
+```
+
+```{=html}
+<style>
+    body .main-container {
+        max-width: 1280px;
+    }
+</style>
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.width = 10, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(tidymodels)
+library(factoextra)
+library(dendextend)
+library(corrplot)
+library(viridis)
+library(patchwork)
+library(DT)
+library(pander)
+library(vip)
+library(patchwork)
+library(janitor)
+library(rpart)
+library(rpart.utils)
+library(rattle)
+library(rpart.plot)
+library(dendextend)
+
+# scaling functions 
+range01 <- function(x){(x-min(x))/(max(x)-min(x))}
+range_wna <- function(x){(x-min(x, na.rm = TRUE))/(max(x, na.rm = TRUE)-min(x, na.rm = TRUE))}
+
+`%out%` <- Negate(`%in%`)
+
+theme_set(theme_minimal())
+
+# pander tables all in one row
+panderOptions('table.split.table', Inf)
+
+# disabling scientific notation
+options(scipen = 999)
+```
+
+```{r}
+survey <- read_csv("./data/survey3.csv")
+
+survey_mini <- survey %>%
+  mutate(
+    edu_higher = ifelse(hoh_education == "edu_higher", 1, 0),
+    edu_low = ifelse(hoh_education %in% c ("edu_none", "edu_primary"), 1, 0),
+    edu_primary = ifelse(hoh_education == "edu_primary", 1, 0),
+    edu_secondary = ifelse(hoh_education == "edu_secondary", 1, 0),
+    # edu_religious = ifelse(hoh_education ==  "edu_religious", 1, 0), 
+    hh_debt = case_when(hh_debt_borrow_from %in% c(1, 2) ~ 0, 
+                        hh_debt_borrow_from %in% c(3, 4, 5, 6, 7, 8, 9) ~ 1, 
+                        TRUE ~ 0)) %>%
+  select(
+    ims_farmer,
+    ims_other, 
+    ims_public_em, 
+    ims_stable_ag, 
+    ims_stable_non_ag, 
+    ims_casual_ag,
+    ims_casual_non_ag,
+    ims_prof_self_em, 
+    ims_no_income, 
+    shocks_conflict,
+    shocks_lostwork,  
+    shocks_foodprices, 
+    shocks_cantworkbusiness,
+    shocks_accessmarket, 
+    no_accessmarket,
+    edu_higher,
+    edu_secondary,
+    edu_primary,
+    edu_low,
+    rural,
+    children_0_4,
+    hoh_female,
+    fies_ateless, fies_fewfoods, fies_healthy, fies_hungry,
+    fies_worried, fies_ranout, fies_whlday, fies_skipped,
+    fcs_stap, fcs_pulse, fcs_dairy, fcs_pr,
+    fcs_veg, fcs_fruit, fcs_fat, fcs_sugar, 
+    fcs_borderline_poor, 
+    cs_stress_hh_assets,
+    cs_stress_spent_savings,
+    cs_stress_credit,
+    cs_stress_borrowed_money,
+    cs_crisis_sold_prod_assets,
+    cs_crisis_no_school,
+    cs_crisis_reduced_health_exp,
+    cs_crisis_childwork,
+    cs_crisis_consumed_seed_stocks,
+    cs_emergency_sold_house,
+    cs_emergency_hh_risk,
+    cs_emergency_sold_last_draught,
+    cs_emergency_hh_migration, 
+    hh_debt_more,
+    survey_id, 
+    agri_hhd, 
+    hh_size, 
+    no_accessmarket, 
+    not_improved_drinking_water, 
+    tot_income,
+    income_reduced, 
+    covid_goodstransp, 
+    covid_marketclosed
+  ) %>%
+  mutate(across(where(is.numeric), ~ replace(., is.na(.), 0))) 
+```
+
+```{r}
+
+plot_coef <- function(tbl) {
+  
+  tbl %>%
+    tidy(conf.int = TRUE) %>% 
+    filter(term != "(Intercept)") %>% 
+    filter(p.value <= .05) %>% 
+    mutate(term = fct_reorder(term, estimate)) %>%  
+    ggplot(aes(x = estimate, y = term, colour = estimate)) + 
+    geom_vline(xintercept = 0, lty = 2, colour = "red") + 
+    geom_point() + 
+    geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = .2) + 
+    scale_colour_viridis(option = "turbo") + 
+    theme(legend.position = "none", 
+          plot.background = element_rect(colour = "white"))
+}
+
+```
+
+
+## Coefficient plots 
+
+```{r fig.height = 8}
+survey_mini %>%
+  left_join(survey %>% select(score = fs_score, survey_id), by = "survey_id") %>% 
+  select(-survey_id, -matches("cs_|fies_|fcs_"), -tot_income) %>%
+  mutate(score = log(score), 
+         score = ifelse(is.infinite(score), 0, score))  %>% 
+  lm(score ~ ., data = .) %>% 
+  plot_coef() + 
+  labs(title = "Food Insecurity Score", y = "") +
+
+survey_mini %>%
+  left_join(survey %>% select(score = hhfcs_inv, survey_id), by = "survey_id") %>% 
+  select(-survey_id, -matches("cs_|fies_|fcs_"), -tot_income) %>%
+  # mutate(score = log(score), 
+  #        score = ifelse(is.infinite(score), 0, score))  %>% 
+  lm(score ~ ., data = .) %>% 
+  plot_coef() + 
+  labs(title =  "Food Consumption Score", y = "") +
+  
+survey_mini %>% 
+  left_join(survey %>% select(score = csi_weighted, survey_id), by = "survey_id") %>% 
+  select(-survey_id, -matches("cs_|fies_|fcs_"), -tot_income) %>%
+  # mutate(score = log(score), 
+  #        score = ifelse(is.infinite(score), 0, score))  %>% 
+  lm(score ~ ., data = .) %>% 
+  plot_coef() + 
+  labs(title = "Coping Strategies Index", y = "") + 
+  
+survey_mini %>% 
+  left_join(survey %>% select(score = fies_raw_range, survey_id), by = "survey_id") %>% 
+  select(-survey_id, -matches("cs_|fies_|fcs_"), -tot_income) %>%
+  # mutate(score = log(score), 
+  #        score = ifelse(is.infinite(score), 0, score))  %>% 
+  lm(score ~ ., data = .) %>% 
+  plot_coef() + 
+  labs(title = "Food Insecurity Experience Scale", y = "") + 
+  
+  plot_annotation(title = "Coefficient plots -- food security indices", 
+                  subtitle = "Redder colours indicate higher correlations with food insecurity", 
+                  caption = "Data source: WFP-FAO survey; only showing indicators with p-value < 0.05", 
+                  theme = theme(plot.caption = element_text(hjust = .5)))
+  
+```
+
+
+<br><br><br>
+
+## Priority non-priority
+
+>A household would be considered a priority for intervention when above the 75th percentile in at least two out of the three food security indices (food consumption score, coping strategies index and food insecurity experience scale)
+
+```{r fig.height = 8}
+survey_mini %>% 
+  left_join(survey %>% select(survey_id, weight_final, 
+                              fies_raw_range, csi_weighted, hhfcs_inv, fs_score), by = "survey_id") %>%
+  mutate(priority = ifelse(fs_score >= quantile(fs_score, probs = .75), 
+                           "priority", "not_priority")) %>%
+  filter(hh_size != 0) %>% 
+  select(matches("fies_|fcs_|cs_"), priority) %>% 
+  group_by(priority) %>% 
+  summarise_all(mean) %>% 
+  pivot_longer(cols = -c(priority)) %>%  
+  filter(name %out% c("hhfcs_inv", "fs_score", "csi_weighted", "fies_raw_range", "fcs_borderline_poor")) %>% 
+  ggplot(aes(y = value, x = name)) + 
+  geom_col(position = position_dodge(), aes(fill = priority), width = .5) + 
+  scale_fill_brewer(palette = "Dark2") + 
+  scale_y_continuous(labels = percent_format(accuracy = 1), breaks = seq(0, 1, .1)) + 
+  labs(x = "", y = "Percent of group", 
+       title = "Food security indicators -- priority and non-priority group") +  
+  coord_flip() + 
+  theme(plot.background = element_rect(colour = "white"))
+  
+# ggsave(filename = "./misc/priority_non_priority_round3.png", dpi = 300, height = 7, width = 11, units = "in")
+  
+```
+
+<br><br><br>
+
+## Food security indicators by priority group 
+
+```{r fig.height=8}
+survey_mini %>% 
+  left_join(survey %>% select(survey_id, weight_final, 
+                              fies_raw_range, csi_weighted, hhfcs_inv, fs_score), by = "survey_id") %>%
+  mutate(priority = ifelse(fs_score >= quantile(fs_score, probs = .75), 
+                           "priority", "not_priority")) %>%
+  filter(hh_size != 0) %>% 
+  select(-matches("fcs_|cs_|fies_|cluster|state|adm3|weight_final")) %>% 
+  select(-survey_id) %>% 
+  group_by(priority) %>% 
+  summarise_all(mean) %>% 
+  pivot_longer(cols = -c(priority)) %>% 
+  pivot_wider(names_from = priority, values_from = value) %>% 
+  arrange(desc(priority)) %>% 
+  mutate(percent_diff = (priority - not_priority) / not_priority) %>% 
+  mutate_at(vars(not_priority, priority, percent_diff), ~ round(.x * 100, digits = 2)) %>% 
+  mutate(not_priority = ifelse(name %in% c("tot_income", "hh_size",
+                                           "fs_score", "hhfcs_inv", "csi_weighted", "fies_raw_range"),
+                               round(not_priority / 100, digits = 2), not_priority), 
+         priority = ifelse(name %in% c("tot_income", "hh_size", 
+                                       "fs_score", "hhfcs_inv", "csi_weighted", "fies_raw_range"),
+                           round(priority / 100, digits = 2), priority)) %>%  
+  arrange(desc(percent_diff)) %>% 
+  filter(name %out% c("csi_weighted", "fies_raw_range", "hhfcs_inv", "fs_score", "tot_income")) %>% 
+  mutate(name = fct_reorder(name, percent_diff)) %>% 
+  ggplot(aes(x = priority, y = name)) + 
+  geom_col(aes(fill = percent_diff)) + 
+  geom_text(aes(label = percent_diff), hjust = 0, size = 2.5) + 
+  scale_fill_viridis(option = "inferno", direction = -1) + 
+  scale_x_continuous(breaks = seq(0, 60, by = 10)) +
+  labs(x = "% of priority group", y = "", fill = "%diff", 
+       title = "Indicators most associated with food insecurity", 
+       subtitle = "Darker colours show indicators most associated with food insecurity", 
+       caption = "Data source: FAO-WFP food security survey round 3") + 
+  theme(plot.caption = element_text(hjust = .5), 
+        plot.background = element_rect(colour = "white"))
+
+# ggsave(filename = "./misc/food_insecurity_round3.png", dpi = 300, height = 7, width = 11, units = "in")
+  
+```
+
+<br><br><br>
+
+## Impact of conflict on food insecurity
+
+```{r}
+
+survey %>%
+  select(shocks_conflict, hoh_education, fs_score) %>%
+  group_by(hoh_education) %>% 
+  do(tidy(lm(data = ., formula = fs_score ~ shocks_conflict), conf.int = TRUE)) %>% 
+  filter(term != "(Intercept)" & !is.na(hoh_education)) %>%
+  filter(p.value < .05) %>% 
+  ungroup() %>% 
+  mutate(hoh_education = fct_reorder(hoh_education, estimate)) %>% 
+  ggplot(aes(x = estimate, y = hoh_education, colour = estimate)) + 
+    geom_vline(xintercept = 0, lty = 2, colour = "red") + 
+    geom_point(size = 2) + 
+    geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = .2) + 
+    scale_colour_viridis(option = "turbo") + 
+    theme(legend.position = "none", 
+          axis.text.y = element_text(size = 8.5), 
+          axis.title.x = element_text(size = 7, face = "bold"), 
+          plot.title = element_text(size = 9), 
+          plot.background = element_rect(colour = "white")) + 
+  labs(y = "Education level, head of household") + 
+
+survey %>%
+  select(shocks_conflict, income_main_text, fs_score) %>%
+  group_by(income_main_text) %>% 
+  do(tidy(lm(data = ., formula = fs_score ~ shocks_conflict), conf.int = TRUE)) %>% 
+  filter(term != "(Intercept)" & !is.na(income_main_text)) %>%
+  filter(p.value < .05) %>% 
+  ungroup() %>% 
+  mutate(income_main_text = str_remove(income_main_text, "ims_"), 
+         income_main_text = fct_reorder(income_main_text, estimate)) %>% 
+  ggplot(aes(x = estimate, y = income_main_text, colour = estimate)) + 
+    geom_vline(xintercept = 0, lty = 2, colour = "red") + 
+    geom_point(size = 2) + 
+    geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = .2) + 
+    scale_colour_viridis(option = "turbo") + 
+    theme(legend.position = "none", 
+          axis.text.y = element_text(size = 8.5), 
+          axis.title.x = element_text(size = 7, face = "bold"), 
+          plot.title = element_text(size = 9), 
+          plot.background = element_rect(colour = "white")) + 
+  labs(y = "Main income source") + 
+  
+  
+  plot_annotation(title = "Impact of conflict on food insecurity ", 
+                  subtitle = "Redder colours indicate higher correlations with food insecurity", 
+                  caption = "Data source: WFP-FAO survey; only showing indicators with p-value < 0.05", 
+                  theme = theme(plot.caption = element_text(hjust = .5)))
+  
+# ggsave(filename = "./misc/conflict_estimates.png", dpi = 300, height = 7, width = 11, units = "in")
+
+
+```
+
+<br><br><br>
+
+## Community preferences
+
+
+```{r fig.height=8}
+survey %>% 
+  mutate_at(vars(contains("need_")), ~ .x * weight_final) %>% 
+  select(contains("need_")) %>% 
+  select(-contains("received")) %>% 
+  replace(is.na(.), 0) %>%
+  summarise_all(mean) %>%
+  pivot_longer(cols = everything()) %>% 
+  filter(value >= .01) %>% 
+  mutate(name = str_remove(name, "need_"), 
+         name = fct_reorder(name, value)) %>% 
+  ggplot(aes(x = value, y = name)) + 
+  geom_col() + 
+  geom_text(aes(label = percent(value, accuracy = .1)), hjust = -.1) + 
+  scale_x_continuous(labels = percent) +
+  labs(x = "% of population", y = "Need", 
+       title = "Most common needs", 
+       caption = "Data source: FAO-WFP food security survey round 3") + 
+  theme(plot.background = element_rect(colour = "white"))
+
+# ggsave(filename = "./misc/most_common_needs.png", dpi = 300, height = 7, width = 11, units = "in")
+
+```
+
+## Hierarchical clustering
+
+```{r}
+# Using ward
+survey_ward <- recipe(~., data = survey_mini) %>%
+  update_role(survey_id, new_role = "ID") %>% 
+  step_normalize(all_predictors()) %>% 
+  prep() %>%
+  bake(new_data = NULL) %>% 
+  dist() %>% 
+  hclust(method = "ward.D2")
+
+survey_ward$labels <- survey$survey_id
+
+```
+
+```{r}
+survey_hclust <- tibble(
+  label = survey_ward$labels,
+  cluster_id = cutree(survey_ward, k = 11)) %>%
+  right_join(survey_mini, by = c("label" = "survey_id")) %>% 
+  mutate(cluster = case_when(cluster_id ==  1 ~ "L",
+                             cluster_id ==  2 ~ "M", 
+                             cluster_id ==  3 ~ "N", 
+                             cluster_id ==  4 ~ "O", 
+                             cluster_id ==  5 ~ "P", 
+                             cluster_id ==  6 ~ "Q", 
+                             cluster_id ==  7 ~ "R", 
+                             cluster_id ==  8 ~ "S",
+                             cluster_id ==  9 ~ "T", 
+                             cluster_id == 10 ~ "U", 
+                             cluster_id == 11 ~ "V", 
+                             cluster_id == 12 ~ "W")) %>% 
+  rename(survey_id = label) %>% 
+  left_join(survey %>%
+              select(survey_id, adm3_pcode, weight_final, 
+                     hhfcs_inv, fs_score, 
+                     fies_raw_range, csi_weighted), 
+            by = "survey_id") %>% 
+  left_join(read_csv("./data/pcodes.csv") %>% 
+              select(admin3_pcode, state) %>% 
+              distinct(), 
+              by = c("adm3_pcode" = "admin3_pcode")) %>%
+  mutate(cluster_id = as.factor(cluster_id)) %>% 
+  group_by(cluster_id) %>% 
+  mutate(cluster_count = ifelse(is.na(cluster_id), 0, 1), 
+         cluster_n = sum(cluster_count)) %>% 
+  ungroup()
+
+
+```
+
+### Dendrogram
+
+```{r fig.height = 8}
+survey_ward %>% as.dendrogram() %>%
+  set("branches_k_color", k = 11) %>% 
+  set("labels_col", "white") %>% 
+  plot(main = "Dendrogram of surveyed households")
+```
+
+### Clustering reference table 
+
+```{r fig.height=8}
+js <- c(
+  "function(settings){",
+  "  var datatable = settings.oInstance.api();",
+  "  var table = datatable.table().node();",
+  "  var caption = 'fs_score, fcs, fies & csi rescaled between 0 (best) and 1 (worst); other columns show percentages of group populations.'",
+  "  $(table).append('<caption style=\"caption-side: bottom\">' + caption + '</caption>');",
+  "}"
+)
+
+survey_hclust %>% 
+  left_join(survey %>% select(survey_id, weight_final)) %>% 
+  # filter(cluster_id !=  "O") %>%
+  filter(hh_size != 0) %>% 
+  # mutate(cluster = case_when(cluster == "O" ~ "S", TRUE ~ paste0(cluster))) %>% 
+  group_by(cluster) %>% 
+  summarise(sample = n(),       
+            fs_score = mean(fs_score, na.rm = TRUE),
+            fies = mean(fies_raw_range, na.rm = TRUE),
+            csi = mean(csi_weighted, na.rm = TRUE), 
+            fcs = mean(hhfcs_inv, na.rm = TRUE),
+            weighted = sum(weight_final, na.rm = TRUE), 
+            rural = mean(rural, na.rm = TRUE), 
+            income_reduced = mean(income_reduced, na.rm = TRUE),
+            debt_more = mean(hh_debt_more, na.rm = TRUE), 
+            conflict = mean(shocks_conflict), 
+            lost_work = mean(shocks_lostwork), 
+            food_prices = mean(shocks_foodprices), 
+            stable_non_ag = mean(ims_stable_non_ag),
+            farmer = mean(ims_farmer), 
+            stable_ag = mean(ims_stable_ag), 
+            casual_ag = mean(ims_casual_ag), 
+            casual_non_ag = mean(ims_casual_non_ag), 
+            public_em = mean(ims_public_em), 
+            no_income = mean(ims_no_income),
+            children_0_4 = mean(children_0_4, na.rm = TRUE), 
+            edu_sec_high = mean((edu_secondary + edu_higher), na.rm = TRUE),
+            tot_income = sum(tot_income, na.rm = TRUE),
+            pop = sum(hh_size, na.rm = TRUE)) %>%  
+  mutate_at(vars(rural:children_0_4), ~ round(.x * 100, digits = 2)) %>% 
+  mutate_at(vars(fs_score, fies, csi, fcs), ~ range_wna(.x)) %>%
+  mutate_at(vars(sample), ~ round((.x)/ sum(.x) * 100, digits = 2)) %>% 
+  mutate_at(vars(weighted), ~ round((.x)/ sum(.x) * 100, digits = 2)) %>% 
+  mutate(income_pc = round(tot_income / pop, digits = 0)) %>% 
+  select(-tot_income, -pop, -sample) %>% 
+  relocate(income_pc, .after = rural) %>% 
+  arrange(desc(fs_score)) %>% 
+  
+  datatable(filter = list(position = "top", clear = FALSE),
+            options = list(pageLength = 12, scrollX = TRUE,
+              initComplete = JS(js),#This will avoid looping of the caption when there is pagination
+              headerCallback = DT::JS("function(thead) {", 
+                          "  $(thead).css('font-size', '.8em');",
+                          "}")),
+  caption = htmltools::tags$caption(style = "caption-side: top; color: black; 
+                                              text-align: center; font-size: 130%;",
+                                              "Possible component of a beneficiary profile"), 
+  ) %>%  
+  formatRound(c("fs_score", "fies", "csi", "fcs", "edu_sec_high"), digits = 3) %>%
+  formatStyle(0, target = "row", lineHeight = "80%", fontSize = "80%") 
+
+```
+
