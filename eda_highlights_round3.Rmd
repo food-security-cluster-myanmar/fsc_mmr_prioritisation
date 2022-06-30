@@ -206,6 +206,60 @@ survey_mini %>%
   
 ```
 
+<br><br>
+
+### Food insecurity and main income source 
+
+```{r}
+survey_mini %>%
+  left_join(survey %>% select(score = fs_score, survey_id), by = "survey_id") %>% 
+  select(score, matches("ims_")) %>%
+  mutate(score = log(score), 
+         score = ifelse(is.infinite(score), 0, score))  %>% 
+  lm(score ~ ., data = .) %>% 
+  tidy(conf.int = TRUE) %>% 
+  filter(term != "(Intercept)") %>% 
+  # filter(p.value <= .05) %>% 
+  mutate(term = str_remove(term, "ims_")) %>% 
+  mutate(term = fct_reorder(term, estimate)) %>%
+  ggplot(aes(x = estimate, y = term, colour = estimate)) + 
+  geom_vline(xintercept = 0, lty = 2, colour = "red") + 
+  geom_point() + 
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = .2) + 
+  scale_colour_viridis(option = "turbo") + 
+  theme(legend.position = "none", 
+        plot.background = element_rect(colour = "white"), 
+        plot.caption = element_text(hjust = .5)) +
+  labs(title = "Food insecurity and main income source", y = "", 
+       caption = "Data source: WFP-FAO survey")
+```
+<br><br>
+
+### Food insecurity and shocks 
+
+```{r}
+survey_mini %>%
+  left_join(survey %>% select(score = fs_score, survey_id), by = "survey_id") %>% 
+  select(score, matches("shocks_")) %>%
+  mutate(score = log(score), 
+         score = ifelse(is.infinite(score), 0, score))  %>% 
+  lm(score ~ ., data = .) %>% 
+  tidy(conf.int = TRUE) %>% 
+  filter(term != "(Intercept)") %>% 
+  # filter(p.value <= .05) %>% 
+  mutate(term = str_remove(term, "shocks_")) %>% 
+  mutate(term = fct_reorder(term, estimate)) %>%
+  ggplot(aes(x = estimate, y = term, colour = estimate)) + 
+  geom_vline(xintercept = 0, lty = 2, colour = "red") + 
+  geom_point() + 
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = .2) + 
+  scale_colour_viridis(option = "turbo") + 
+  theme(legend.position = "none", 
+        plot.background = element_rect(colour = "white"), 
+        plot.caption = element_text(hjust = .5)) +
+  labs(title = "Food insecurity and shocks", y = "", 
+       caption = "Data source: WFP-FAO survey")
+```
 
 <br><br><br>
 
