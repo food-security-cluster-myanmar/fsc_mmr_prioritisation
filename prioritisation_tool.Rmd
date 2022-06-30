@@ -1049,6 +1049,8 @@ mdp_scatter <- fs_pin %>%
   geom_vline(aes(xintercept = median(mdp_adjust)), colour = "red", lty = 2) +
   geom_point(aes(size = population_2021_proj), alpha = .7) +
   scale_colour_viridis(option = "magma", direction = -1) + 
+  scale_x_continuous(trans = "log10") + 
+  scale_y_continuous(trans = "log10") + 
   labs(x = "Multidimensional vulnerability (2019)", y = "Conflict score (2021)", colour = "conflict\nscore", 
        title = "Multidimensional vulnerability and conflict by township", 
        subtitle = "Averages marked by red lines; population marked by size")
@@ -1146,6 +1148,8 @@ fs_pin %>%
   guides(colour = "none", size = "none") +
   labs(x = "Multidimensional vulnerability (2019)", y = "Conflict score (2021)") + 
   scale_colour_viridis_d(option = "cividis") + 
+  scale_x_continuous(trans = "log10") + 
+  scale_y_continuous(trans = "log10") + 
   
 fs_pin %>% 
   ggplot(aes(x = population_density, y = conflict_score)) + 
@@ -1156,6 +1160,7 @@ fs_pin %>%
   labs(size = "population", 
        x = "Persons per km2 (reversed)", y = "Conflict score (2021)") + 
   scale_colour_viridis_d(option = "cividis") + 
+  scale_y_continuous(trans = "log10") + 
 
   plot_layout(widths = 1) + 
   plot_annotation(title = "Comparison between vulnerability, population density and conflict score", 
@@ -1227,6 +1232,8 @@ group_scatter <- fs_pin %>%
   geom_vline(aes(xintercept = median(mdp_adjust)), colour = "red", lty = 2) +
   geom_point(aes(size = population_2021_proj), alpha = .7) +
   scale_colour_viridis_d(option = "cividis") + 
+  scale_x_continuous(trans = "log10") + 
+  scale_y_continuous(trans = "log10") + 
   labs(x = "Multidimensional vulnerability (2019)", y = "Conflict score (2021)", 
        colour = "group", size = "", 
        title = "Multidimensional vulnerability and conflict by township", 
