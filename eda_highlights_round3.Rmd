@@ -209,7 +209,7 @@ survey_mini %>%
 
 <br><br><br>
 
-## Priority non-priority
+## Priority households
 
 >A household would be considered a priority for intervention when above the 75th percentile in at least two out of the three food security indices (food consumption score, coping strategies index and food insecurity experience scale)
 
@@ -339,6 +339,62 @@ survey %>%
 # ggsave(filename = "./misc/conflict_estimates.png", dpi = 300, height = 7, width = 11, units = "in")
 
 
+```
+<br><br><br>
+
+### Effects of conflict on food security 
+
+```{r estimate-plot-fs-indices}
+
+con_est <- function(tbl, y, x, z){
+  
+  y <- enquo(y)
+  x <- enquo(x)
+  z <- enquo(z)
+  
+  model_formula <- formula(paste0(quo_name(y), "~", quo_name(x)))
+  
+  lm(model_formula, data = tbl) %>% 
+    tidy(conf.int = TRUE) %>% 
+    filter(term != "(Intercept)") %>% 
+    mutate(model = paste0(quo_name(y), "_", quo_name(z)))
+}
+
+rbind(
+survey %>% 
+  filter(rural == 1) %>% 
+  con_est(hhfcs_inv, shocks_conflict, rural), 
+survey %>% 
+  filter(rural == 1) %>% 
+  con_est(fies_raw_range, shocks_conflict, rural),
+survey %>%  
+  filter(rural == 1) %>% 
+  con_est(csi_weighted, shocks_conflict, rural),
+survey %>% 
+  filter(rural == 0) %>% 
+  con_est(hhfcs_inv, shocks_conflict, urban), 
+survey %>% 
+  filter(rural == 0) %>% 
+  con_est(fies_raw_range, shocks_conflict, urban),
+survey %>%  
+  filter(rural == 0) %>% 
+  con_est(csi_weighted, shocks_conflict, urban)
+) %>% 
+  mutate(significant = ifelse(p.value < 0.05, 1, 0),
+         model = recode(model, "hhfcs_inv_rural" = "FCS_rural", "hhfcs_inv_urban" = "FCS_urban",
+                        "fies_raw_range_rural" = "FIES_rural", "fies_raw_range_urban" = "FIES_urban",  
+                        "csi_weighted_rural" = "CSI_rural", "csi_weighted_urban" = "CSI_urban"),
+         model = fct_reorder(model, estimate)) %>% 
+  ggplot(aes(x = estimate, y = model, colour = estimate)) + 
+  geom_vline(xintercept = 0, lty = 2, colour = "red") + 
+  geom_point(aes(pch = fct_rev(factor(significant))), size = 2) + 
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2) + 
+  scale_colour_viridis(option = "turbo", guide = "none") + 
+  labs(x = "Estimate", y = "", 
+       title = "Effect of conflict on food security indices", 
+       subtitle = "Split by rural/urban contexts",
+       pch = "Significant") 
+  
 ```
 
 <br><br><br>
