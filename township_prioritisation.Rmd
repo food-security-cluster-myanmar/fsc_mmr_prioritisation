@@ -1,0 +1,1140 @@
+---
+title: "Township Prioritisation"
+author: "Myanmar Food Security Cluster"
+date: "25/05/2022"
+output: 
+  html_document:
+    code_download: true
+    theme: readable
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    number_sections: false
+    collapsed: false
+always_allow_html: true   
+---
+
+```{css, echo=FALSE}
+
+#TOC::before {
+  content: "";
+  display: block;
+  height: 70px;
+  margin: 2em 20px 40px 20px;
+  background-image: url("Myanmar_cluster_blue.png");
+  background-size: contain;
+  background-position: center center;
+  background-repeat: no-repeat;
+}
+```
+
+```{=html}
+<style>
+    body .main-container {
+        max-width: 1280px;
+    }
+</style>
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.width=9, message = FALSE, warning=FALSE)
+library(tidyverse)
+library(readxl)
+library(haven)
+library(lubridate)
+library(stringi)
+library(pander)
+library(janitor)
+library(scales)
+library(magrittr)
+library(sf)
+library(bookdown)
+library(patchwork)
+library(kableExtra)
+library(DT)
+library(viridis)
+library(mdepriv)
+library(psych)
+library(widyr)
+library(rpart)
+library(rpart.utils)
+library(rattle)
+library(broomstick)
+library(corrplot)
+library(broom)
+library(tidytext)
+library(plotly)
+library(ggridges)
+library(RColorBrewer)
+library(ggforce)
+
+# if this is just townships, you can just take out haven and maybe tidytext? 
+
+theme_set(theme_minimal())
+
+# disabling scientific notation
+options(scipen = 999)
+
+# pander tables all in one row
+panderOptions('table.split.table', Inf)
+
+# pander thousands separator
+panderOptions("big.mark", ",")
+
+# replace 
+opts <- options(knitr.kable.NA = "")
+
+`%out%` <- Negate(`%in%`)
+
+# function beneficiary summaries
+sum_ben <- function(df, column_var){
+  
+  column_var <- enquo(column_var)
+  
+  df %>%
+    group_by(!!column_var) %>% # must add bang-bang
+    summarise(beneficiaries = sum(beneficiaries)) %>% 
+    arrange(desc(beneficiaries))
+    
+}
+
+# function beneficiary summaries, 2 grouped variables
+sum_ben2 <- function(df, column_var1, column_var2){
+  
+  column_var1 <- enquo(column_var1)
+  column_var2 <- enquo(column_var2)
+  
+  df %>%
+    group_by(!!column_var1, !!column_var2) %>% # must add bang-bang
+    summarise(beneficiaries = sum(beneficiaries)) %>% 
+    arrange(desc(beneficiaries))
+    
+}
+
+# scaling functions 
+range01 <- function(x){(x-min(x))/(max(x)-min(x))}
+range_wna <- function(x){(x-min(x, na.rm = TRUE))/(max(x, na.rm = TRUE)-min(x, na.rm = TRUE))}
+
+#mode function 
+mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+# show_col(viridis_pal(option = "cividis")(10))
+```
+
+```{r datasets}
+# look at datasets.rmd for more info on cleaning
+
+# pcodes
+pcodes <- read_excel("./data/Myanmar PCodes Release_9.3_Jan2021_(StRgn_Dist_Tsp_Town_Ward_VT).xlsx",
+                     sheet = "03_Township") %>%
+  rename(admin1_pcode = SR_Pcode,
+         state = SR_Name_Eng,
+         admin3_pcode = Tsp_Pcode,
+         township = Township_Name_Eng,
+         admin2_pcode = `District/SAZ_Pcode`, 
+         district = `District/SAZ_Name_Eng`)
+
+# shapefiles
+pcode3_shape <- st_read("./mmr_polbnda_adm3_mimu_250k/mmr_polbnda_adm3_mimu_250k.shp", 
+                        quiet = TRUE) %>% 
+ rename(state = ST, 
+        admin1_pcode = ST_PCODE,
+        township = TS,
+        admin3_pcode = TS_PCODE) %>% 
+ mutate(admin3_pcode = ifelse(str_detect(township, "Hlaingtharya"), "MMR013008", admin3_pcode))
+
+pcode1_shape <- st_read("./mmr_polbnda2_adm1_mimu_250k/mmr_polbnda2_adm1_mimu_250k.shp", quiet = TRUE) %>% 
+ rename(state = ST, 
+        admin1_pcode = ST_PCODE) %>% st_as_sf()
+
+# reading in 5Ws 2021
+fsc_2021 <- read_csv("./data/fsc5w_2021.csv")
+
+# 2022 Q1 5Ws
+fsc <- read_csv("./data/fsc_q1_2022.csv")
+
+# reading in vulnerability dataset
+vulmmr <- read_csv("./data/vulmmr.csv")
+
+# ACLED dataset
+acled <- read_csv("./data/acled_new.csv") %>% 
+  mutate(has_village = if_else(location != admin3, "yes", "no"))
+
+# reading in conflict score
+conflict_score <- read_csv("./data/conflict_score2.csv")
+
+# show_col(viridis_pal()(10))
+
+floods_storm_surge <- read_csv("./data/floods_storm_surge.csv")
+
+fs_pin <- read_csv("./data/fs_pin.csv")
+
+```
+
+## Introduction 
+
+This document is the first of two on prioritisation and is focused on geographic prioritisation. The second will focus on establishing a beneficiary profile. This first document makes use of data from the Armed Conflict Location and Event Dataset (ACLED) and the Myanmar Information Management Unit (MIMU) to develop a conflict score, examine pre-existing vulnerability and map our flood risk at the township level. This document is closed with a section on technical notes. 
+
+<br>
+
+
+### References for this report
+* ACLED (2022). ACLED data for Myanmar (2010-2022). https://acleddata.com.
+* Maria Noel Pi Alperin, Philippe Van Kerm (2009). mdepriv: Synthetic indicators of multiple deprivation. Stata command. http://medim.ceps.lu/stata/mdepriv_v3.pdf
+* Atillio Benini, Aldo Benini (2021). mdepriv: Synthetic scores of multiple deprivation. R package version 0.0.3.  https://github.com/a-benini/mdepriv/.
+* Gianni Betti, Vijay Verma (2004). A methodology for the study of multi-dimensional and longitudinal aspects of poverty and deprivation. Dipartamento di Metodi Quantitativi, Universita di Siena. http://repec.deps.unisi.it/quaderni/49DMQ.pdf. 
+* FAO and WFP (2022). Myanmar | Shocks, agricultural livelihoods and food security: Monitoring report, March 2022. Rome. 
+* Food Security Cluster, Myanmar (2021). 5Ws reporting tool.
+* Food Security Cluster, Myanmar (2022). Understanding Conflict Dynamics in Myanmar through Conflict and Incident Data: A Food Security Perspective. https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/.
+* HARP-F and MIMU (2018). Vulnerability in Myanmar: A Secondary Data Review of Needs, Coverage and Gaps. http://themimu.info/vulnerability-in-myanmar.
+* IFPRI (2022). Household Welfare in Myanmar: Results from the Myanmar Household Welfare Survey. 
+* MIMU (2022). Climate, Environmental Degradation and Disaster Risk in Myanmar. 
+* UNHCR (2022). Pre and Post 1 Feb 2021 IDPs Population by Township level. 
+* WFP Nigeria Country Office (2018). Standard Operating Procedure: Beneficiary Targeting in North Eastern Nigeria. Directive: NCO/PU/2019/04. 
+
+<br><br><br>
+
+## 1. Conflict and pre-existing vulnerability
+
+Myanmar had the most conflict events out of any country in 2021, exceeding Syria, Yemen and Afghanistan. 
+
+The table below highlights the fourteenfold increase in conflict events and thirteenfold increase in conflict fatalities in Myanmar in 2021 compared to the average for the prior decade. 
+
+<br>
+
+```{r table-conflict-years-compare}
+acled %>% 
+  filter(sub_event_type != "Peaceful protest") %>% 
+  mutate(years = ifelse(year %out% c(2021, 2022), "2010-2020", year)) %>%
+  group_by(years) %>%
+  summarise(total_events = n()) %>% 
+  mutate(avg_events_per_year = ifelse(years %in% c(2021, 2022), total_events, total_events / 11)) %>% 
+  left_join(acled %>%
+              filter(sub_event_type != "Peaceful protest") %>% 
+              mutate(years = ifelse(year %out% c(2021, 2022), "2010-2020", year)) %>%
+              group_by(years) %>%
+              summarise(total_fatalities = sum(fatalities)) %>% 
+              mutate(avg_fatalities_per_year = ifelse(years %in% c(2021, 2022), total_fatalities, total_fatalities / 11)), 
+            by = "years") %>%
+  mutate_at(vars(avg_events_per_year, avg_fatalities_per_year), ~round(.x, digits = 0)) %>% 
+  kable(caption = "Increase in conflict events and fatalities compared to previous decade", 
+        format.args = list(big.mark = ",")) %>% 
+  kable_classic_2("striped") %>% 
+  footnote("Data source: ACLED; accleddata.com. Data for 2022 is until 2022-05-31.", general_title = "")
+
+```
+
+<br>
+
+Given the more than fourteenfold increase in conflict events and thirteenfold increase in conflict fatalities in Myanmar in 2021 (compared to the average for the preceding 10 years), conflict will be major part of determining which areas have the greatest humanitarian needs. However, scoring townships based only on one variable would lead to a very uni-dimensional understanding of the crisis. 
+
+Similar to how a beneficiary profile was established in order to inform beneficiary selection, this section, will focus on what variables should be considered when prioritising amongst the various geographic areas in Myanmar and how the results of such a prioritisation should be applied. As with earlier sections, the analysis here is meant to describe and inform programmatic and operational decision making, as opposed to dictating it, as each partner will have their own considerations and limitations. 
+
+The plot below shows the cumulative number of conflict events, broken down by the 9 most common sub-event types. 
+
+<br>
+
+```{r sub-event-type, fig.height = 6}
+acled %>%
+  filter(year >= 2021) %>% 
+  mutate(sub_event_type = fct_lump(sub_event_type, 9)) %>% 
+  mutate(month = floor_date(event_date, "month")) %>% 
+  mutate(month = map(month, ~ seq.Date(as.Date(.), as.Date("2022/05/01"), by = "month"))) %>% 
+  unnest(month) %>% 
+  group_by(month, sub_event_type) %>%
+  summarise(events = n()) %>% 
+  ggplot(aes(x = month, y = events, group = sub_event_type, fill = sub_event_type)) + 
+  geom_area() + 
+  scale_x_date(date_breaks = "1 month", labels = date_format(format = "%Y-%b")) + 
+  scale_y_continuous(breaks = seq(0, 22000, by = 2000), labels = comma) +
+  scale_fill_viridis_d(option = "turbo") + 
+  theme(legend.position = "top",
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1), 
+        plot.caption = element_text(hjust = .5)) + 
+  labs(x = "", 
+       y = "Cumulative conflict events", 
+       fill = "", 
+       title = "Cumualtive 2021-2022 conflict events per month, by sub-event type", 
+       caption = "Data source: Armed Conflict Location & Event Data Project (ACLED); acleddata.com") 
+  
+```
+
+<br>
+
+This plot below breaks down fatalities over time by sub-event type. 
+
+<br>
+
+
+```{r fatalities, fig.height = 6}
+acled %>%
+  filter(year >= 2021) %>% 
+  mutate(sub_event_type = ifelse(
+    sub_event_type %out% c("Armed clash", "Remote explosive/landmine/IED", "Attack", 
+                           "Excessive force against protesters", "Shelling/artillery/missile attack", 
+                           "Violent demonstration", "Air/drone strike	"), "Other", sub_event_type
+  )) %>% 
+  mutate(month = floor_date(event_date, "month")) %>% 
+  mutate(month = map(month, ~ seq.Date(as.Date(.), as.Date("2022/05/01"), by = "month"))) %>% 
+  unnest(month) %>% 
+  group_by(month, sub_event_type) %>%
+  summarise_at("fatalities", sum) %>% 
+  ggplot(aes(x = month, y = fatalities, group = sub_event_type, fill = sub_event_type)) + 
+  geom_area() + 
+  scale_x_date(date_breaks = "1 month", labels = date_format(format = "%Y-%b")) + 
+  scale_y_continuous(breaks = seq(0, 22000, by = 2000), labels = comma) +
+  scale_fill_viridis_d(option = "inferno") + 
+  theme(legend.position = "top",
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1), 
+        plot.caption = element_text(hjust = .5)) + 
+  labs(x = "", 
+       y = "Cumulative fatalities", 
+       fill = "", 
+       title = "Cumualtive 2021-2022 conflict-fatalities per month, by sub-event type", 
+       caption = "Data source: Armed Conflict Location & Event Data Project (ACLED); acleddata.com")
+```
+
+<br>
+
+And the ratio of peaceful protests versus non-peaceful incidents over time. Whilst peaceful protests are far from their peak in Februrary 2021 of 1582 events or 85% of the monthly total, as of May 2022, they still remained at 12% of all conflict events or 149 events. 
+
+<br>
+
+```{r peaceful-protests, fig.height = 6}
+acled %>%
+  filter(year >= 2021) %>%
+  mutate(peaceful_protest = ifelse(sub_event_type == "Peaceful protest", "yes", "no")) %>% 
+  group_by(event_date, peaceful_protest) %>% 
+  summarise(events = n()) %>% 
+  ggplot(aes(x = event_date, y = events, fill = peaceful_protest, group = peaceful_protest)) +
+  geom_area(size = 1) +
+  scale_x_date(date_breaks = "1 month", labels = date_format(format = "%Y-%b")) +
+  labs(x = "", 
+       y = "Number of conflict events", 
+       title = "Ratio of peaceful protests to non-peaceful incidents", 
+       subtitle = "1 Jan 2021 - 31 May 2022", 
+       caption = "Data source: Armed Conflict Location & Event Data Project (ACLED); acleddata.com") + 
+  theme(legend.position = "top",
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1), 
+        plot.caption = element_text(hjust = .5))
+  
+```
+
+<br> 
+
+For a more comprehensive review of conflict in Myanmar, please refer to the Food Security Cluster's report [Understanding Conflict Dynamics in Myanmar through Conflict and Incident Data: A Food Security Perspective](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/). And for a more comprehensive review of multidimensional vulnerabilty in Myanmar, please refer to MIMU-HARP's [Vulnerability Study](http://themimu.info/sites/themimu.info/files/documents/Report_Vulnerability_in_Myanmar_HARP-MIMU_Jun2018_ENG_Print_version.pdf).  
+
+<br><br>
+
+### 1.1 Conflict events and fatalities by state/region
+
+```{r confict-state-barplot}
+conflict_score %>% 
+  select(admin3_pcode, battles, explosions_remote_violence, protests_and_riots, 
+         strategic_developments, violence_against_civilians) %>% 
+  pivot_longer(cols = c(battles:violence_against_civilians), names_to = "event_type", values_to = "value") %>% 
+  left_join(fs_pin %>% select(admin3_pcode, state), by = "admin3_pcode") %>% 
+  group_by(state) %>% 
+  mutate(total_events = sum(value)) %>% 
+  ungroup() %>% 
+  mutate(state = fct_reorder(state, -total_events)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = state, y = value, fill = event_type)) + 
+  geom_col() +
+  scale_y_continuous(labels = comma) +
+  theme(axis.text.x = element_text(angle = 30, vjust = 0.7, hjust = 0.7), 
+        plot.caption = element_text(hjust = 0.5)) +
+  labs(x = "", 
+       y = "Conflict events",
+       title = "Conflict events by state (Jan 2021 - May 2022)",
+       caption = "Data source: ACLED; acleddata.com")
+
+#ggsave("event_type_state.png", dpi = 300, height = 5, width = 8, units = "in")
+```
+
+<br>
+
+Starting at the state/region level, Sagaing saw the highest number of conflict events as well as conflict as well as conflict-related fatalities in 2012. It experienced more than three times as many conflict-related fatalities than the next-highest state/region -- Magway. This is a significant shift in the pattern of conflict in Myanmar, which has traditionally revolved around Kachin, Rakhine and Shan. 
+
+Kayah, Chin and Sagaing had the highest number of conflict fatalities per capita in 2021. 
+
+<br>
+
+```{r conflict-fatalities-barplot}
+
+conflict_score %>% 
+  select(admin3_pcode, fatalities) %>% 
+  left_join(fs_pin %>% select(admin3_pcode, state, population_2021_proj), by = "admin3_pcode") %>% 
+  group_by(state) %>% 
+  summarise(fatalities = sum(fatalities), 
+            pop = sum(population_2021_proj)) %>% 
+  mutate(fatalities_pc = fatalities / pop) %>% 
+  mutate(state = fct_reorder(state, -fatalities)) %>% 
+  ggplot(aes(x = state, y = fatalities, fill = fatalities_pc)) +
+  geom_col() + 
+  scale_fill_viridis(option = "magma", direction = -1) +
+  scale_y_continuous(labels = comma) +
+  theme(axis.text.x = element_text(angle = 30, vjust = 0.7, hjust = 0.7),
+        plot.caption = element_text(hjust = 0.5)) +
+  labs(x = "",
+       y = "Number of fatalities", 
+       title = "Conflict fatalities by state (Jan 2021 - May 2022)",
+       subtitle ="and fatalities per capita", 
+       fill = "fatalities\nper capita",
+       caption = "Data source: ACLED; acleddata.com")
+
+# ggsave("fatalities_state.png", dpi = 300, height = 5, width = 8, units = "in")
+  
+```
+
+
+<br><br>
+
+### 1.2 Conflict score by township
+
+As can be seem from the state/region barplots in the previous section, the distribution of conflict events and fatalities is not even, and is skewed towards a few states/regions. This is also evident at township level. In the scatter plot below, the averages of the number of conflict events and the number of fatalities at the township level have been marked by the dotted red lines, dividing the plot into four quadrants. 
+
+To better discriminate amongst the numerous townships, a conflict score has been developed. A requisite for any prioritisation score or index for conflict should be the ability to distinguish, first and foremost, the townships in the upper right quadrant of the plot, which have the heaviest concentrations of conflict events and fatalities. These areas are also where, as we have established in the section on beneficiary selection, where the highest concentrations of households in the priority group will be found. For reference, 58 townships have both above-average numbers of conflict events and fatalities (upper-right quadrant) and 196 townships have both below-average numbers of conflict events and fatalities (bottom-left quadrant). 
+
+<br>
+
+```{r plotly-conflict-scatterplot}
+conflict_scatter <- conflict_score %>% 
+  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
+           violence_against_civilians) %>% 
+  left_join(fs_pin %>% select(state, township, partners_2021, admin3_pcode, population_density), by = "admin3_pcode") %>% 
+  mutate(conflict_score = round(conflict_score, digits = 3)) %>% 
+  ggplot(aes(y = fatalities, x = total_events, colour = conflict_score, 
+             text = paste0(township, ",", "\n",
+                           state, ",", "\n",
+                           "conflict_score: ", conflict_score, ",", "\n", 
+                           "events: ", total_events, ",", "\n",
+                           "fatalities: ", fatalities, ",", "\n",
+                           "partners_2021: ", partners_2021))) +
+  geom_point(aes(size = fatalities), alpha = 0.85) +
+  scale_y_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300, 1000)) +
+  scale_x_continuous(trans = "log10", breaks = c(0, 1, 10, 30, 100, 300)) +
+  scale_colour_viridis(option = "magma", direction = -1) +
+  geom_hline(aes(yintercept = mean(fatalities)), colour = "red", lty = 2) +
+  geom_vline(aes(xintercept = mean(total_events)), colour = "red", lty = 2) +
+  labs(x = "Conflict events", 
+       y = "Fatalities",
+       title = "Conflict events and fatalities by township", 
+       subtitle = "Means of both axes are marked by the dotted red line",
+       colour = "conflict\nscore", 
+       size = "fatalities",
+       caption = "Data source: ACLED; acleddata.com") 
+
+ggplotly(conflict_scatter, tooltip = c("text"), width = 820) %>% 
+  # layout(showlegend = FALSE, legend = list(font = list(size = 6))) %>% 
+  config(displayModeBar = FALSE) %>% 
+  layout(title = list(text = paste0("Conflict events and fatalities by township",
+                                    "<br>",
+                                    "<sup>",
+                                    "mouse over for details; means marked by red lines; fatalities marked by size","</sup>")))
+
+# ggsave("tsp_scatter_conflict.png", dpi = 300, height = 5, width = 8, units = "in")
+
+```
+
+<br>
+
+At its most basic, the conflict score is just the average of battles, explosions, remote violence, violence against civilians, strategic developments, non-peaceful protests and riots, conflict-related fatalities and IDPs (refer to section 4.5 for more details). Additional information can also be found in the FSC's report [Understanding Conflict Dynamics in Myanmar through Conflict and Incident Data: A Food Security Perspective](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/). This score will be now be used as a shorthand for conflict incidence in Myanmar going forward. 
+
+<br><br>
+
+### 1.3 Comparison with multidimensional vulnerability
+
+Conflict, in spite of its out-sized role in the crisis in Myanmar, cannot serve as the only determinant of geographic prioritisation. In order to consider other factors, this document will make use of the MIMU-HARP Vulnerability Index, which is comprised of 8 indicators, selected for their ability to predict the rest of the variables in the 2015 Census dataset. Several of these variables were also collected at district-level and were used to create an updated 2019 Vulnerability index. 
+
+The specific indicators chosen were: 
+
+* % of population without formal identification documents
+* % of population without a middle school education
+* % of females who were illiterate
+* % of households with bamboo or thatched roofs
+* % of households with safe sanitation
+* % of households with access to electricity
+* % of workers who are unpaid family workers
+* The child dependency ratio
+* The conflict index (reflecting battles, fatalities, violence against civilians and displacement)
+
+These indicators were combined to construct a township-level vulnerability index. Of the indicators above, only the percentage of the population without a middle-school education and percentage of the population without formal identification documents were not collected in the 2019 Inter-Censal survey. 
+
+For the remaining indicators, they were bootstrapped using their 2015 township values and the 2019 district-level data. Going forward, the first seven components of the index will be extracted and treated separately as a shorthand for pre-existing multidimensional vulnerability in Myanmar. 
+
+However, the eighth component of the vulnerability index, the conflict index, first constructed in 2015 from ACLED data, can and has been updated with more recent data -- this was done in the previous section. This next few sections will examine the relationship between underdevelopment and the updated 2021 conflict score and the resulting implications on geographic prioritisation for the Food Security Cluster. 
+
+Firstly, from the scatter plot below, underdevelopment and pre-existing vulnerability and conflict are not good predictors of each other. The points in the plot below, each representing a township, split largely across two arcs -- with townships with high conflict scores largely falling around the median for multidimensional vulnerability and townships with very high multidimensional vulnerability tending to have lower conflict scores. 
+
+<br>
+
+```{r plotly-mdp-scatter}
+mdp_scatter <- fs_pin %>%  
+  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
+           violence_against_civilians) %>%
+  filter(conflict_score != 0) %>%
+  ggplot(aes(x = mdp_adjust, y = conflict_score, colour = conflict_score)) + 
+  geom_hline(aes(yintercept = median(conflict_score)), colour = "red", lty = 2) + 
+  geom_vline(aes(xintercept = median(mdp_adjust)), colour = "red", lty = 2) +
+  geom_smooth(se = FALSE, size = .5) +
+  geom_point(aes(size = population_2021_proj, 
+                 text = paste0(township, ",", "\n",
+                           state, ",", "\n",
+                           "events: ", total_events, ",", "\n",
+                           "fatalities: ", fatalities, ",", "\n",
+                           "conflict_score: ", round(conflict_score, digits = 3), ",", "\n", 
+                           "md_vulnerability: ", round(mdp_adjust, digits = 3), ",", "\n", 
+                           "partners_2021: ", partners_2021)),
+             alpha = .7) +
+  scale_colour_viridis(option = "magma", direction = -1) + 
+  scale_x_continuous(trans = "log10") + 
+  scale_y_continuous(trans = "log10") + 
+  labs(x = "Multidimensional vulnerability (2019)", y = "Conflict score (2021)", colour = "conflict\nscore", 
+       title = "Multidimensional vulnerability and conflict by township", 
+       subtitle = "Averages marked by red lines; population marked by size")
+
+ggplotly(mdp_scatter, tooltip = c("text"), width = 820, height = 550) %>% 
+  # layout(showlegend = FALSE, legend = list(font = list(size = 6))) %>% 
+  config(displayModeBar = FALSE) %>% 
+  layout(title = list(text = paste0("Multidimensional vulnerability and conflict by township",
+                                    "<br>",
+                                    "<sup>",
+                                    "Averages marked by red lines; population marked by size","</sup>")))
+```
+
+<br>
+
+This is a reflection of the shift in conflict away from frontier areas to cities and towns that have more strategic targets. The broader involvement of the Bamar majority in the conflict has likely also contributed to this shift -- prior to the February 2021 coup, the conflict was largely between Ethnic Armed Organisations and the Myanmar Armed Forces. However, combatants are now spread throughout the populations, especially with the proliferation of the People's Defence Forces. 
+
+It has been [observed](https://www.irrawaddy.com/news/burma/kachin-independence-army-pdfs-attack-myanmar-junta-bases-in-kachin-state.html) that Ethnic Armed Organisations, such as the Kachin Independence Army, are working closely with the People's Defence Forces, and are training and arming them. This has contributed to the front being moved further forward, outside of the areas that had been traditionally most affected by conflict.
+
+<br><br>
+
+### 1.4 2015 vulnerability bands
+
+This shift in conflict patterns can be further examined by considering the vulnerability bands developed by MIMU-HARP alongside its vulnerability index. In addition to an overall vulnerability score per township, 8 main typologies of vulnerability were also constructed to illustrate the wide variation of contexts and needs in the different parts of the country as well as to group together similar townships so that they may be considered as separate programming blocs. Please refer to the [MIMU-HARP Vulnerability Study](http://themimu.info/sites/themimu.info/files/documents/Report_Vulnerability_in_Myanmar_HARP-MIMU_Jun2018_ENG_Print_version.pdf) for more details. 
+
+According to MIMU-HARP, the result of this grouping is a "lens allowing the most vulnerable to be considered more methodically in policy and programme planning". By using these 8 typologies as a reference, it is possible to understand how the pattern of conflict has changed between 2015 and 2021. 
+
+<br>
+
+```{r table-bands-comparison}
+fs_pin %>%  
+  mutate(old_conflict_score = 1 - old_conflict_score, 
+         count = 1, 
+         above_conflict_mean = ifelse(conflict_env >= 0.1261084, 1, 0),
+         above_conflict_mean_old = ifelse(old_conflict_env >= 0.01504872, 1, 0)) %>%
+  group_by(band_text) %>% 
+  summarise(`2019_vulnerability` = mean(mdp_adjust),         
+            old_conflict_score = mean(old_conflict_env), 
+            conflict_score = mean(conflict_env),
+            tsp_count = n(),
+            tsp_above_mean_2015 = sum(above_conflict_mean_old == 1), 
+            tsp_above_mean_2021 = sum(above_conflict_mean == 1)) %>%
+  mutate(pc_above_mean_2015 = round(tsp_above_mean_2015 / tsp_count * 100, digits = 2), 
+         pc_above_mean_2021 = round(tsp_above_mean_2021 / tsp_count * 100, digits = 2)) %>% 
+  select(-tsp_above_mean_2015, -tsp_above_mean_2021) %>% 
+  mutate_at(vars(conflict_score, old_conflict_score, `2019_vulnerability`), ~ round(.x, digits = 3)) %>%
+  rename(vulnerability_band = band_text, 
+         `2015_score` = old_conflict_score, 
+         `2022_score` = conflict_score, 
+         `%_>avg_2015` = pc_above_mean_2015, 
+         `%_>avg_2021` = pc_above_mean_2021) %>% 
+  kable(caption = "Changes in conflict patterns between 2015 and 2021, by vulnerabilty band") %>% 
+  kable_classic_2("striped") %>% 
+  footnote("Data source: ACLED (accleddata.com) and MIMU; higher scores indicate more vulnerability/conflict", general_title = "") %>% 
+  add_header_above(c(" " = 2, "conflict score" = 2, "townships above avg conflict score" = 3))
+
+```
+
+<br>
+
+
+Conflict, once much more concentrated in underdeveloped frontier areas in the operational areas of Ethnic Armed Organisations, is now much more pronounced in bands 3, 6 and 8, which contain major population centres and secondary cities and towns. Hubs in conflict-affected areas have the highest average 2021 conflict scores. 
+
+Although conflict has persisted or even increased in many of the frontier and remote areas such as Laukkaing, Mongyai and Tangyan (all from band 1), the relative rankings of these areas have changed and they now form a much smaller share of unionwide conflict than they did in 2015. These townships tend to have much lower conflict scores in spite of their high vulnerability, indicating that whilst they remain development priorities, they should fall outside the caseload for humanitarian action. It is recommended that new vulnerability bands be re-developed, as they have proved very useful; but that is outside the scope of this document.  
+
+<br><br>
+
+### 1.5 Clustering townships
+
+In recognition of the different contexts present in Myanmar (and the consequent need for different programming options), a simple K-means clustering was conducted on the townships to split them into prioritisation groups based on their 2021 conflict score, their 2019 vulnerability score and their population density. 
+
+This clustering separates all 330 townships into five groups. The plots below show the spread of townships by prioritisation group across the 2021 conflict score, 2019 vulnerability score and population density. 
+
+<br>
+
+```{r patchwork-clusters}
+
+reverselog_trans <- function(base = exp(1)) {
+    trans <- function(x) -log(x, base)
+    inv <- function(x) base^(-x)
+    trans_new(paste0("reverselog-", format(base)), trans, inv, 
+              log_breaks(base = base), 
+              domain = c(1e-100, Inf))
+}
+
+fs_pin %>%  
+  ggplot(aes(x = mdp_adjust, y = conflict_score)) + 
+  geom_point(aes(colour = cluster, size = population_2021_proj), alpha = .8) + 
+  guides(colour = "none", size = "none") +
+  labs(x = "Multidimensional vulnerability (2019)", y = "Conflict score (2021)") + 
+  scale_size_continuous(range = c(.5, 3)) + 
+  scale_colour_viridis_d(option = "cividis") + 
+  scale_x_continuous(trans = "log10") + 
+  scale_y_continuous(trans = "log10") + 
+  
+fs_pin %>% 
+  ggplot(aes(x = population_density, y = conflict_score)) + 
+  geom_point(aes(colour = cluster, size = population_2021_proj), alpha = .8) + 
+  scale_x_continuous(trans = reverselog_trans(10), breaks = c(0, 1, 10, 100, 1000, 10000), 
+                     labels = comma_format(accuracy = 1)) + 
+  scale_size_continuous(range = c(.5, 3)) + 
+  labs(size = "population", colour = "", 
+       x = "Persons per km2 (reversed)", y = "") + 
+  guides(size = "none") +
+  scale_colour_viridis_d(option = "cividis") + 
+  scale_y_continuous(trans = "log10") + 
+
+  plot_layout(widths = 1) + 
+  plot_annotation(title = "Comparison between vulnerability, population density and conflict score", 
+                  subtitle = "Higher vulnerabilty and conflict scores indicate more vulnerability and conflict", 
+                  caption = "Data source: ACLED (acleddata.com) and MIMU", 
+                  theme = theme(plot.caption = element_text(hjust = .5)))
+
+
+```
+
+<br>
+
+It can be seen that groups A1 and A2, which have the highest conflict scores, are quite distinct from group D (where the majority of the development caseload resides). Group C has neither high vulnerability nor high conflict incidence. And group B consists of solely urban centres. The table below provides more detail on each of the groups. 
+
+Groups A1 and A2 contained 60% of all conflict events and 83% of all conflict fatalities in 2021. Groups A1 and A2 can be distinguished from each other by the intensity of conflict, with A1 being where the concentrations of conflict events and fatalities are the heaviest. 
+
+An interactive version of the plot on the left can be found below. 
+
+<br> 
+
+```{r table-group-summaries}
+fs_pin %>%   
+  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
+           violence_against_civilians) %>%
+  replace_na(list(fatalities = 0)) %>% 
+  group_by(group = cluster) %>% 
+  summarise(conflict_events = sum(total_events, na.rm = TRUE),
+            fatalities = sum(fatalities), 
+            vulnerability_2019 = mean(mdp_adjust),
+            avg_conflict_score = mean(conflict_score, na.rm = TRUE), 
+            ppl_km2 = round(mean(population_density), digits = 0), 
+            population = sum(population_2021_proj), 
+            townships = n()) %>% 
+  mutate(`%_total_population` = round(population / sum(population) * 100, digits = 2),
+         `%_fatalities` = round(fatalities / sum(fatalities) * 100, digits = 2), 
+         `%_conflict_events` = round(conflict_events / sum(conflict_events) * 100, digits = 2)) %>% 
+  select(group, `%_conflict_events`, `%_fatalities`, avg_conflict_score, vulnerability_2019, ppl_km2, 
+         townships, `%_total_population`) %>% 
+  mutate_at(vars(avg_conflict_score, vulnerability_2019), ~round(.x, digits = 3)) %>%
+  kable(caption = "Summary statistics by prioritisation group", format.args = list(big.mark = ",")) %>% 
+  kable_classic_2("striped") %>% 
+  footnote(footnote_as_chunk = TRUE, threeparttable = TRUE, 
+           general = "Groups A1 and A2 have the highest conflict scores and should be prioritised over the others. Higher scores indicate more vulnerability/conflict.", general_title = "") 
+
+# %>%
+#  save_kable(file = "summary_stats_groups.png", zoom = 2)
+```
+
+<br>
+
+Groups A1 and A2 both have middling vulnerability scores, but have much higher average conflict scores. Group A1, in particular, has a very high concentration of conflict incidents and fatalities, in addition to having the second-highest vulnerability scores of the groups. These 69 townships (containing about 24% of the population) are clear priorities for humanitarian action. 
+
+<br>
+
+```{r plotly-group-scatter}
+group_scatter <- fs_pin %>%  
+  mutate(total_events = battles + explosions_remote_violence + protests_and_riots + strategic_developments +
+           violence_against_civilians) %>%
+  filter(conflict_score != 0) %>%
+  ggplot(aes(x = mdp_adjust, y = conflict_score, colour = cluster, 
+             text = paste0(township, ", ", "\n",
+                           state, "\n",
+                           "group: ", cluster, "\n",
+                           "fatalities: ", fatalities, "\n",
+                           "conflict_score: ", round(conflict_score, digits = 3), "\n", 
+                           "vul_score: ", round(mdp_adjust, digits = 3), "\n", 
+                           "population: ", round(population_2021_proj, digits = 0), "\n", 
+                           "partners_2021: ", partners_2021))) + 
+  geom_hline(aes(yintercept = median(conflict_score)), colour = "red", lty = 2) + 
+  geom_vline(aes(xintercept = median(mdp_adjust)), colour = "red", lty = 2) +
+  geom_point(aes(size = population_2021_proj), alpha = .7) +
+  scale_colour_viridis_d(option = "cividis") + 
+  scale_x_continuous(trans = "log10") + 
+  scale_y_continuous(trans = "log10") + 
+  labs(x = "Multidimensional vulnerability (2019)", y = "Conflict score (2021)", 
+       colour = "group", size = "", 
+       title = "Multidimensional vulnerability and conflict by township", 
+       subtitle = "Averages marked by red lines; population marked by size")
+
+ggplotly(group_scatter, tooltip = c("text"), width = 820, height = 550) %>% 
+  # layout(showlegend = FALSE, legend = list(font = list(size = 6))) %>% 
+  config(displayModeBar = FALSE) %>% 
+  layout(title = list(text = paste0("Multidimensional vulnerability and conflict by prioritisation group",
+                                    "<br>",
+                                    "<sup>",
+                                    "Averages marked by red lines; population marked by size","</sup>")))
+
+
+```
+
+<br><br>
+
+### 1.6 Villages affected by conflict
+
+Townships are quite large -- on average, each has a population of `r summarise(fs_pin, mean = round(mean(population_2021_proj), digits = 0)) %>%  pull() %>% format(big.mark = ",")` persons. 
+
+In the ACLED dataset, 
+
+As mentioned earlier, rural households were found to be less resilient and more asset-poor in IFPRI's household welfare survey. These findings align well with the process the Food Security Cluster has developed here to identify priority households (where rural households are significantly more likely to fall into the priority group). It would be extremely fruitful to explore whether this alignment extends to conflict and some of the other environmental and socioeconomic variables that have been employed in this document. 
+
+It should also be noted that townships themselves are quite large -- on average, each has a population of `r summarise(fs_pin, mean = round(mean(population_2021_proj), digits = 0)) %>%  pull() %>% format(big.mark = ",")` persons. In areas where partners are not yet present, this might necessitate an intermediate step to help partners identify specific areas where they could begin working. 
+
+In the ACLED dataset, of the `r filter(acled, year == 2021 & sub_event_type != "Peaceful protest") %>%  nrow() %>%  format(big.mark = ",")` events in 2021, 38% of them were recorded with specific village locations. 
+
+<br>
+
+```{r table-villages}
+acled %>% 
+  filter(year == 2021 & sub_event_type != "Peaceful protest") %>%
+  mutate(has_village = fct_relevel(has_village, c("yes", "no"))) %>% 
+  group_by(has_village) %>% 
+  summarise(events = n(), 
+            fatalities = sum(fatalities),
+            locations = n_distinct(interaction(admin3, location)), .groups = "drop") %>%
+  mutate(`%_events` = round(events / sum(events) * 100, digits = 2), 
+         `%_fatalities` = round(fatalities / sum(fatalities) * 100, digits = 2)) %>% 
+  select(mentions_vilage = has_village, events, `%_events`, fatalities, `%_fatalities`, locations) %>% 
+  kable(caption = "Conflict events with and without villages", format.args = list(big.mark = ","), 
+        table.attr = "style = 'width:60%;'") %>% 
+  kable_classic_2() %>% 
+  footnote("Data source: ACLED; accleddata.com", general_title = "")
+
+
+```
+
+<br>
+
+Below is an interactive reference table of the 1,917 villages identified in the ACLED dataset, complete with coordinates. While this list does provide an excellent start, by working in these areas, partners should also endeavour to identify the specific locations of the remaining 62% of conflict events. 
+
+<br>
+
+```{r dt-conflict-villages}
+acled %>%
+  mutate(has_village = fct_relevel(has_village, c("yes", "no"))) %>%
+  filter(year == 2021 & sub_event_type != "Peaceful protest" & has_village == "yes") %>%
+  group_by(state = admin1, township = admin3, village = location) %>% 
+  mutate(event_count = 1) %>% 
+  summarise(events = n(), 
+            fatalities = sum(fatalities), 
+            battles = sum(event_count[event_type == "Battles"]), 
+            remote_violence = sum(event_count[event_type == "Explosions/Remote violence"]), 
+            violence_v._civilians = sum(event_count[event_type == "Violence against civilians"]),
+            latitude = max(latitude),
+            longitude = max(longitude)) %>%
+  filter(village %out% c("Mandalay", "Yangon")) %>% 
+  arrange(desc(fatalities)) %>% 
+  datatable(filter = list(position = "top", clear = FALSE), 
+            options = list(pageLength = 10, scrollX = TRUE, 
+                           headerCallback = DT::JS("function(thead) {", 
+                          "  $(thead).css('font-size', '.8em');",
+                          "}")), 
+            caption = htmltools::tags$caption(style = 'caption-side: top;
+                                              text-align: center;
+                                              color: black; font-size: 120%;',
+                                              "Reference table -- conflict-affected villages")) %>% 
+  formatStyle(0, target = "row", lineHeight = "80%", fontSize = "80%")
+
+```
+
+
+<br><br>
+
+### 1.7 5W results from the first quarter of 2022
+
+In the first quarter of 2022, Food Security Cluster partners have reached a total of `r sum(fsc$new_beneficiaries) %>% format(big.mark = ",")` persons or `r round(sum(fsc$new_beneficiaries) / sum(fs_pin$fs_targeted) * 100, digits = 2)`% of the 2022 target. Below is an examination of the extent to which partners have targeted the townships most affected by conflict. 
+
+In this first plot, the number of beneficiaries reached in the first quarter of 2022 are plotted against the targeted population. Each point is a township and the red line down the middle represents reaching 100% of the target. How far above or below a township is indicates how far above or below the target it is. Additionally, the township prioritisation group each township belongs to is marked by the colour. 
+
+The townships on the far left of the plot have beneficiaries despite not having targets for 2022 (their targets have been nominally coded as $1$ so they appear on the plot). 
+
+<br>
+
+```{r plotly-tsp-reached-groups}
+ben_target <- fsc %>% 
+  group_by(admin3_pcode_old) %>% 
+  summarise(beneficiaries = sum(new_beneficiaries),
+            partners = n_distinct(org_code)) %>% 
+  right_join(fs_pin %>% 
+               rename(beneficiaries_2022 = beneficiaries), 
+             by = c("admin3_pcode_old" = "admin3_pcode")) %>% 
+  replace_na(list(beneficiaries = 0)) %>% 
+  mutate(reached_pc = beneficiaries / fs_targeted,
+         reached_pc = ifelse(is.infinite(reached_pc), 1, reached_pc),
+         fs_targeted = ifelse(fs_targeted == 0 & beneficiaries > 0, 1, fs_targeted),
+         fs_targeted = round(fs_targeted, digits = 0)) %>% 
+  arrange(desc(reached_pc)) %>% 
+  select(state, township, fs_pin, fs_targeted, beneficiaries, reached_pc, partners, cluster) %>%
+  mutate(pc_target = round(beneficiaries / fs_targeted * 100, digits = 2)) %>% 
+  ggplot(aes(x = fs_targeted, y = beneficiaries, colour = cluster, 
+             text = paste0(township, ",", "\n",
+                           state, ",", "\n",
+                           "beneficiaries_2022: ", beneficiaries, "\n",
+                           "target_2022: ", fs_targeted, "\n",
+                           "%_reached: ", pc_target, "\n", 
+                           "partners_2022: ", partners, "\n",
+                           "group: ", cluster))) + 
+  geom_abline(intercept = 0, slope = 1, lty = 2, colour = "red") + 
+  geom_point(aes(size = beneficiaries), alpha = 0.8) +
+  scale_size_continuous(guide = "none") + 
+  scale_x_continuous(trans = "log10", labels = comma) + 
+  scale_y_continuous(trans = "log10", labels = comma) +
+  scale_colour_viridis_d(option = "cividis") +
+  # scale_colour_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
+  labs(y = "Beneficiaries", x = "Targeted population", colour = "Group", 
+       title = "Targeted population per township vs beneficiaries reached in Q1 2022, by prioritisation group",
+       subtitle = "The red line is 100% of target")
+
+ggplotly(ben_target, tooltip = c("text"), width = 820) %>% 
+  config(displayModeBar = FALSE) %>% 
+  layout(title = list(text = 
+                        paste0("Targeted population per township vs beneficiaries reached in Q1 2022",
+                                    "<br>",
+                                    "<sup>",
+                                    "By prioritisation group; the red line is 100% of target; size is beneficiaries reached","</sup>")))
+```
+
+<br>
+
+With reference to the table below, 2.8% of beneficiaries came from group A1 and 10.7% of beneficiaries came from group A2. On the surface, this seems like partners have made effort to reach conflict-affected townships. However, this reach has largely been due to oversubscription in Sittwe, where the number of beneficiaries reached in 152% of the target. 
+
+The development of the prioritisation groups also brings up the broader point of whether or not cluster targets are in line with needs and if they should be reformulated based on the information now available, as the targets in groups B and C are noticeably higher than those in group A. Nevertheless, it is hoped that partners will be able to afford townships in groups A1 and A2 greater coverage as the year progresses. 
+
+<br>
+
+```{r table-reached-group}
+fsc %>% 
+  group_by(admin3_pcode_old) %>% 
+  summarise(beneficiaries = sum(new_beneficiaries),
+            partners = n_distinct(org_code)) %>% 
+  right_join(fs_pin %>%  select(-beneficiaries), by = c("admin3_pcode_old" = "admin3_pcode")) %>% 
+  replace_na(list(beneficiaries = 0)) %>%
+  mutate(gap = ifelse(fs_targeted - beneficiaries <= 0, 0, fs_targeted - beneficiaries),
+         reached_pc = 1 - gap / fs_targeted, 
+         fs_targeted = ifelse(fs_targeted == 0 & beneficiaries > 0, 1, fs_targeted),
+         has_beneficiaries = ifelse(beneficiaries > 0, 1, 0)) %>% 
+  group_by(cluster) %>% 
+  summarise(beneficiaries = sum(beneficiaries, na.rm = TRUE), 
+            fs_targeted = sum(fs_targeted, na.rm = TRUE), 
+            gap = sum(gap, na.rm = TRUE), 
+            tsp_reached = sum(has_beneficiaries), 
+            tsp_total = n()) %>% 
+  mutate(pc_gap = round(gap / fs_targeted * 100, digits = 2), 
+         pc_ben = round(beneficiaries / sum(beneficiaries) * 100, digits = 2)) %>% 
+  mutate_at(vars(fs_targeted, gap), ~ round(.)) %>% 
+  select(group = cluster, beneficiaries, `%_ben` = pc_ben, target = fs_targeted, 
+         gap, `%_gap` = pc_gap, tsp_reached, tsp_total) %>% 
+  kable(caption = "2022 Q1 beneficiaries and percent reached by prioritisation group", 
+        format.args = list(big.mark = ",")) %>% 
+  kable_classic_2("striped") %>% 
+  footnote("Any reach above 100% is counted as 100%; exceeding the target in one township does not affect other townships", 
+           general_title = "")
+
+```
+
+<br>
+
+
+Overall, these are not encouraging results. Notably, only `r filter(fsc, state == "Sagaing") %>% {sum(.$new_beneficiaries)} %>% format(big.mark = ",")` beneficiaries being reached in the whole of Sagaing, where the fighting has been heaviest. It is recommended that targets and plans for the Food Security Cluster be reviewed, and partners be reminded to reallocate resources away from oversubscribed areas and away from group C, which are neither humanitarian nor development priorities.
+
+<br><br>
+
+### 1.8 Maps of conflict scores and prioritisation group
+
+```{r map-conflict-score, fig.height=9}
+
+fs_pin %>% 
+  right_join(pcode3_shape, by = "admin3_pcode") %>% 
+  st_as_sf() %>% 
+  ggplot() +
+  geom_sf(aes(fill = conflict_score), size = 0.1) + 
+  geom_sf(data = pcode1_shape, alpha = 0, colour = "black", size = 0.5) + 
+  scale_fill_viridis_c(option = "magma", direction = -1) +
+  theme_void() + 
+  labs(title = "Conflict score by township (as of 1 June 2022)",
+       caption = "Data source: ACLED; acleddata.com",
+       fill = "Conflict\nscore") +
+  theme(plot.caption=element_text(hjust = 0.5), 
+        plot.background = element_rect(fill = "white", colour = NA)) +
+
+fs_pin %>% 
+  left_join(pcode3_shape, by = "admin3_pcode") %>% 
+  st_as_sf() %>% 
+  ggplot() + 
+  geom_sf(aes(fill = cluster), size = 0.1, colour = "gray20") + 
+  geom_sf(data = pcode1_shape, alpha = 0, colour = "black", size = 0.5) +
+  # scale_fill_manual(values = c("#575C6DFF", "#00204DFF", "#C4B56CFF", "#FFEA46FF")) +
+  scale_fill_viridis_d(option = "cividis") +
+  theme_void() +
+  labs(title = "Townships by prioritisation group", 
+       fill = "Priori-\ntisation\ngroup",
+       caption = "Data source: ACLED; acleddata.com and FSC calculations") +
+  theme(plot.caption=element_text(hjust = 0.5), 
+        plot.background = element_rect(fill = "white", colour = NA))  
+  
+# ggsave("conflict_score_map.png", dpi = 300, height = 12, width = 7, units = "in")
+```
+
+<br><br>
+
+### 1.9 Reference table for conflict variables
+
+Below is an interactive reference table for the various types of conflict events by township. It also includes the overall conflict score and prioritisation groups. The search bar can be used to find specific townships, or any of the columns may be sorted according to ascending or descending values. The table currently shows townships in descending order of conflict score. 
+
+<br>
+
+```{r dt-reference-table}
+fs_pin %>% 
+  select(state, township, pop_2021 = population_2021_proj, ppl_km2 = population_density, 
+         PIN = fs_pin, target = fs_targeted,
+         group = cluster, vulnerability = mdp_adjust, conflict_score, fatalities,
+         battles, explosions_remote_violence, protests_and_riots, strategic_developments, 
+         violence_v._civilians = violence_against_civilians,
+         admin3_pcode) %>% 
+  arrange(desc(conflict_score)) %>% 
+  datatable(filter = list(position = "top", clear = FALSE),
+            options = list(pageLength = 10, scrollX = TRUE, 
+                           headerCallback = DT::JS("function(thead) {", 
+                          "  $(thead).css('font-size', '.8em');",
+                          "}")),
+            caption = htmltools::tags$caption(style = "caption-side: top;
+                                              text-align: center; font-size: 140%;",
+                                              "2021 conflict indicators by township")) %>% 
+  formatRound(c("pop_2021", "ppl_km2", "target", "PIN"), digits = 0) %>% 
+  formatRound(c("conflict_score", "vulnerability"), digits = 3) %>% 
+  formatStyle(0, target = "row", lineHeight = "80%", fontSize = "80%")
+ 
+```
+
+<br><br><br>
+
+## 2. Distribution of flood risk in Myanmar
+
+
+### 2.1 Historical flood data 
+
+In light of the impending monsoon season, the probability that a township will be affected by a major flood or cylconic event has been calculated. Major floods since 2008 have been factored into this calculation. 
+
+For the moment, conflict incidence and flood and cyclone risk will be evaluated separately. Flood and storm surge risk exist as probabilities for the moment and are intended to support prepositioning and Disaster Risk Reduction. This might change were severe flooding to occur in 2022. 
+
+<br>
+
+```{r barplot-flood-risk}
+floods_storm_surge %>% 
+  select(starts_with("year_"), admin3_pcode) %>% 
+  pivot_longer(cols = c(-admin3_pcode), names_to = "floods", values_to = "value") %>% 
+  mutate(floods = str_remove_all(floods, "year_")) %>% 
+  group_by(floods) %>% 
+  filter(value == TRUE) %>% 
+  summarise(townships_affected = n()) %>% 
+  mutate(floods = fct_rev(floods)) %>% 
+  ggplot(aes(x = townships_affected, y = floods, fill = floods)) + 
+  geom_col() +  
+  theme(legend.position = "none", 
+        plot.caption = element_text(hjust = 0.5)) +
+  labs(y = "", 
+       x = "Number of townships affected", 
+       title = "Townships affected by floods and storm surges (2008-2021)",
+       caption = "Data source: MIMU and UNDP")
+
+ # ggsave("by_floods.png", dpi = 300, height = 5, width = 8, units = "in")
+```
+
+<br>
+
+Based on this data, a score was calculated for each township based on how many times it had been affected by floods since 2008. The table below also summarises the number of people in need (2022). `r fs_pin %>% filter(flood_count > 4) %>% {sum(.$fs_pin)} %>% round() %>% format(big.mark = ",")` people live in townships that have flooded more than 5 times since 2008. 
+
+```{r}
+fs_pin %>% 
+  replace_na(list(flood_count = 0)) %>% 
+  # mutate(flood_count = ifelse(flood_count > 4, "5-9", flood_count)) %>% 
+  group_by(flood_count) %>% 
+  summarise(townships = n(),
+            people_in_need = round(sum(fs_pin), digits = 0)) %>% 
+  arrange(desc(flood_count)) %>% 
+  kable(caption = "Summary statistics by number of floods (2008-2021)", format.args = list(big.mark = ",")) %>% 
+  kable_classic_2("striped", full_width = FALSE) %>% 
+  column_spec(1:3, width = "8em") %>% 
+  footnote("Data source: MIMU and UNDP", general_title = "")
+
+```
+
+<br><br>
+
+### 2.2 Map of flood risk 
+
+The map below shows the probability of each township being affected by floods. The areas with the greatest risk of flooding are in Mon, near the mouth of the Sittaung River and the Gulf of Mottama and those along the Ayeyarwady River, and to a lesser extent, along the Chindwin River. 
+
+<br>
+
+```{r map-floods, fig.height = 12}
+
+fs_pin %>% 
+  left_join(pcode3_shape, by = "admin3_pcode") %>% 
+  st_as_sf() %>% 
+  ggplot() +
+  geom_sf(size = 0.1, aes(fill = flood_prob)) +
+  geom_sf(data = pcode1_shape, size = 0.5, alpha = 0, colour = "gray20") +
+  scale_fill_viridis(option = "plasma", direction = -1, label = percent_format(accuracy = 1)) +
+  theme_void() +
+  theme(plot.background = element_rect(fill = "white", colour = NA),
+        plot.caption = element_text(hjust = 0.5)) +
+  labs(title = "Flood risk in Myanmar (2008-2021)", 
+       fill = "flood\nrisk", 
+       caption =  "Data source: MIMU and UNDP")
+
+# ggsave("flood_risk.png", dpi = 300, height = 12, width = 7, units = "in")
+```
+
+<br><br>
+
+### 2.3 Reference table for flood risk 
+
+Below is an interactive reference table for flood risk by township. It includes the number of times since 2008 a township has been affected by flooding (flood_count) and the probability of flooding (flood_risk). Similar to the interactive table in the previous chapter, the search bar can be used to find specific townships and any of the columns may be sorted according to ascending or descending values. The table currently shows townships sorted in descending order of flood risk.
+
+<br>
+
+
+```{r}
+fs_pin %>% 
+  select(state, township, pop_2021 = population_2021_proj, ppl_km2 = population_density, 
+         PIN = fs_pin, target = fs_targeted,
+         flood_risk = flood_prob, flood_count,
+         admin3_pcode) %>% 
+  arrange(desc(flood_risk)) %>% 
+  datatable(filter = list(position = "top", clear = FALSE),
+            options = list(pageLength = 10, scrollX = TRUE),
+            caption = htmltools::tags$caption(style = "caption-side: top;
+                                              text-align: center; font-size: 140%;",
+                                              "Flood risk by township")) %>% 
+  formatRound(c("pop_2021", "ppl_km2", "target", "PIN"), digits = 0) %>% 
+  formatRound(c("flood_risk"), digits = 2)
+ 
+```
+
+<br><br><br>
+
+## 3. Technical notes
+
+These annexes contain additional technical information that informed the decisions in the earlier sections. 
+
+
+### 3.1 Limitations and next steps 
+
+<br>
+
+#### FAO-WFP food security survey 
+
+The most important limitation of the FAO-WFP survey was the exclusion of several key states and regions from the survey. Of particular interest are Sagaing, Magway and Mandalay where the conflict has been particularly intense. 
+
+Furthermore, the dry zone was not surveyed. From an agricultural perspective, this is a major omission as the diversity of crops and, consequently, diets are much higher in the dry zone than in the other parts of the country, which are predominantly focused on paddy.
+
+Additionally, the targeting process proposed in this document has not yet been trialled in the field. The Food Security Cluster does not have the resources to undertake a field test of this scale. However, every attempt has been made to corroborate the data presented in it. 
+
+In spite of these major limitations and the numerous assumptions that have had to made, the FAO-WFP survey is most comprehensive dataset on food security that has been collected so far. Additional efforts will be made to cross-reference these data from those of other surveys. These models will be updated once the third round of the FAO-WFP survey is ready. As a final point in this section, the FAO-WFP survey, in spite of its limitations forms the basis of the People in Need calculations, which underpins a lot of the response. 
+
+This paper serves a proposal on how vulnerable households (such as those in the priority group) may be identified and targeted. Should this methodology prove sound and viable, it is suggested that it be applied to either IFPRI's Household Welfare Survey as well as data collected in the third round of the FAO-WFP food security survey. 
+
+<br><br>
+
+#### MIMU-HARP vulnerability analysis 
+
+The results of the 2015 [MIMU-HARP Vulnerability Analysis](http://themimu.info/vulnerability-in-myanmar) (used to inform scores for multidimensional vulnerability), have been updated using the 2019 Inter-Censal Survey results using the following formula:  
+
+$$
+2019TspValue = 2015TspValue / 2015DistrictValue \cdot 2019DistrictValue
+$$
+
+This allows the new township values to tally with the 2019 district-level inter-censal survey results as well as to preserve the order and relationships of townships within each district. For the two indicators in the 2015 dataset but not covered in the 2019 inter-censal survey, they were forward filled, using their 2015 values. To further improve these estimations, multiple imputation should be employed. But that will be left for any subsequent revisions to this document. 
+
+<br><br>
+
+#### Conflict data and ACLED
+
+Perhaps the most key limitation has also been the lack of field access and detailed assessment data from many parts of the country. With the conflict ongoing, and the footprints of humanitarian agencies largely skewed towards Yangon and Rakhine, which have been comparatively less affected by the current crisis, there is a demonstrable dearth of first-hand information in key areas. This document has intended to circumvent this through the use of ACLED data, which is the most complete set of conflict incident data in Myanmar. 
+
+However, the ACLED dataset is not without its limitations -- the majority of its information, about 85 percent, comes from subnational, national and international media sources. The remainder comes from ACLED’s partner, the Myanmar Peace Monitor, and reports from UN agencies, international monitoring groups, and local human rights organisations. The completeness of the conflict data and how representative it is of the situation on the ground is not something that is easily verifiable. Though it should be noted that ACLED still has the largest and most comprehensive dataset of conflict incidents in Myanmar. 
+
+<br><br>
+
+### 3.2 Calculating the conflict score
+
+The conflict score here originally appeared in the Food Security Cluster's report [Understanding Conflict Dynamics in Myanmar through Conflict and Incident Data: A Food Security Perspective](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/). It was calculated using ACLED data and yields a score for each township. 
+
+The conflict score is an update of the conflict index in the [MIMU-HARP Vulnerability Analysis](http://themimu.info/vulnerability-in-myanmar), using 2021 data. The specific conflict variables that included in the score were battles, explosions and remote violence, non-peaceful protests and riots, conflict-related fatalities, strategic developments and number of IDPs. Only the version of the conflict score within this document takes IDPs into account; in the Food Security Cluster's earlier report on conflict (linked in the previous paragraph), the Cluster did not yet have access to detailed IDP data. 
+
+The conflict score is an average of the normalised values of key conflict indicators. Its main use it to aid decisions about geographic prioritisation. These normalised values have been re-weighted with Betti-Verma method, which penalises redundancy and rewards variation; this is the only notable divergence from the MIMU-HARP methodology. The Betti-Verma method was employed through the **`mdepriv`** package developed by Attilio and Aldo Benini.
+
+Unlike the Food Insecurity Score, the component variables of the conflict index were not binary, meaning that it was possible to take advantage of the Betti-Verma method's double-weighting rule which is sensitive to both the relative frequency of the variables and the correlation amongst variables: 
+
+$$
+w_j \propto (w_j^a \cdot w_j^b)
+$$
+
+However, it must be noted that whilst the scores themselves can be shared and used, replicating all the calculations will necessitate obtaining permission from [UNHCR](mailto:<Nii Ako Sowa>sowanii@unhcr.org?cc=myayaim@unhcr.org&subject=Myanmar%20IDP%20data) as their township-level breakdown of IDP populations have not been shared publicly. The specific code for calculating the conflict score can be found below. 
+
+<br>
+
+```{r eval=FALSE, echo=TRUE}
+
+# Betti-Verma calculations and the construction of the conflict score
+index_shares2 <- conflict_df2 %>%   
+  mutate_at(vars(c(battles, explosions_remote_violence, violence_against_civilians, 
+                   fatalities, strategic_developments, 
+                   protests_and_riots, total_idps)), 
+           scale) %>%  
+  mutate_at(vars(c(battles, explosions_remote_violence, violence_against_civilians, 
+                   fatalities, strategic_developments, 
+                   protests_and_riots, total_idps)), 
+           funs((. - min(., na.rm = T))/(max(., na.rm = T) - min(., na.rm = T)))) %>% 
+  mdepriv(c("battles", "explosions_remote_violence", 
+            "violence_against_civilians", "fatalities", 
+            "strategic_developments", "protests_and_riots", "total_idps"),
+          # IDP counts have been used in the score, but will not be read 
+          # into this report
+          method = "bv", output = "all")
+
+
+```
+
+<br>
+
+For reference, below is the code use to cluster townships according to the conflict and multidimensional vulnerability. 
+
+```{r echo = TRUE, eval = FALSE}
+# k-means clustering and output
+set.seed(123)
+
+km_res2 <- fs_pin %>% 
+  replace_na(list(fatalities = 0)) %>% 
+  select(population_density, conflict_score, mdp_adjust, fatalities) %>%
+  mutate_at(vars(population_density, 
+                 conflict_score, 
+                 mdp_adjust, 
+                 fatalities), 
+            ~ (.x - min(.x)) / (max(.x) - min(.x))) %>% 
+  kmeans(5, nstart = 25)
+
+```
+
